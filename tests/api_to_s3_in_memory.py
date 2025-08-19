@@ -1,0 +1,200 @@
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+from datetime import datetime
+import io, os, time, json, requests, boto3
+
+# ---------- small helpers ----------
+def log(debug: bool, *a: Any) -> None:
+    if debug:
+        print(*a)
+
+def dumps_line(obj: Any) -> bytes:
+    # NDJSON line (UTF-8, newline-terminated)
+    return (json.dumps(obj, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+
+def parse_s3_uri(uri: str) -> Tuple[str, str, str]:
+    """
+    s3://bucket/path/to/name.json -> (bucket, 'path/to', 'name.json')
+    """
+    if not uri.startswith("s3://"):
+        raise ValueError(f"Invalid S3 URI (must start with s3://): {uri}")
+    without = uri[5:]
+    parts = without.split("/", 1)
+    if len(parts) == 1:
+        raise ValueError("S3 URI must include a key/path")
+    bucket, key = parts[0], parts[1].strip("/")
+    if not key:
+        raise ValueError("S3 URI must include a key/path after the bucket")
+    if "/" in key:
+        prefix, fname = key.rsplit("/", 1)
+    else:
+        prefix, fname = "", key
+    return bucket, prefix, fname
+
+def build_s3_client(config: Dict[str, Any]):
+    # username/password (access/secret); supports S3-compatible endpoints
+    return boto3.client(
+        "s3",
+        aws_access_key_id=config["s3_username"],
+        aws_secret_access_key=config["s3_password"],
+        region_name=config.get("s3_region"),
+        endpoint_url=config.get("s3_endpoint_url"),
+    )
+
+# ---------- API paging (simple, with retry) ----------
+def fetch_batches(
+    api_url: str,
+    access_token: str,
+    start_time: str,
+    end_time: str,
+    page_size: int,
+    timeout: int,
+    debug: bool,
+    extra_params: Optional[Dict[str, Any]] = None,
+) -> Iterable[List[Dict[str, Any]]]]:
+    """
+    Yields batches (<= page_size) as list[dict].
+    Retries on 429/5xx (up to 5 attempts with exponential backoff).
+    Stops on empty page.
+    """
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {access_token}",
+    }
+    params = {
+        "sysparm_query": f"sys_updated_onBETWEEN{start_time}@{end_time}",
+        "sysparm_limit": page_size,
+        "sysparm_offset": 0,
+        "sysparm_display_value": "true",
+    }
+    if extra_params:
+        params.update(extra_params)
+
+    with requests.Session() as session:
+        while True:
+            attempt, backoff = 0, 1.0
+            while True:
+                attempt += 1
+                try:
+                    resp = session.get(api_url, headers=headers, params=params, timeout=timeout)
+                    if resp.status_code in (429, 500, 502, 503, 504):
+                        raise requests.HTTPError(f"retryable {resp.status_code}", response=resp)
+                    resp.raise_for_status()
+                    break
+                except Exception as e:
+                    if attempt >= 5:
+                        raise
+                    log(debug, f"[retry {attempt}/4] {e}; sleeping {backoff:.1f}s")
+                    time.sleep(backoff)
+                    backoff *= 2
+
+            data = resp.json()
+            batch = data.get("result") or []
+            log(debug, f"Fetched batch size: {len(batch)} offset={params['sysparm_offset']}")
+            if not batch:
+                return
+            yield batch
+            params["sysparm_offset"] = int(params["sysparm_offset"]) + int(params["sysparm_limit"])
+
+# ---------- In-RAM part builder + uploader ----------
+def run_export_in_memory(config: Dict[str, Any], record: Dict[str, Any]) -> List[str]:
+    """
+    No local storage:
+      1) Stream API batches into an in-memory buffer (BytesIO) capped at ≤ part_max_bytes.
+         Each buffer is NDJSON (.json extension for object key).
+      2) When a buffer reaches the cap, upload it immediately to S3 as one object.
+      3) If ANY error occurs, delete all objects uploaded in this run (rollback).
+    Returns: list of S3 keys uploaded on success.
+    """
+    debug = bool(config.get("debug", True))
+
+    # --- required inputs ---
+    needed = ["api_url", "access_token", "s3_username", "s3_password"]
+    miss = [k for k in needed if not config.get(k)]
+    if miss:
+        raise ValueError(f"Missing config keys: {miss}")
+    if "s3_uri" not in record:
+        raise ValueError("record must include 's3_uri' like s3://bucket/path/file.json")
+    if "start_time" not in record or "end_time" not in record:
+        raise ValueError("record must include 'start_time' and 'end_time' (strings for API filter)")
+
+    api_url     = config["api_url"]
+    token       = config["access_token"]
+    start_time  = record["start_time"]   # strings expected (already in API format)
+    end_time    = record["end_time"]
+    page_size   = int(config.get("page_size", 1000))
+    timeout     = int(config.get("timeout", 30))
+    extra       = config.get("extra_query_params")
+    part_max    = int(config.get("part_max_bytes", 250 * 1024 * 1024))  # 250 MB
+    index_name  = config.get("index_name", "dataset")
+
+    bucket, prefix, _orig_fname = parse_s3_uri(record["s3_uri"])
+    prefix = (prefix or "").strip("/")
+    epoch  = str(int(time.time()))
+    base   = f"{index_name}_{epoch}"  # final keys: {base}_part-00001.json
+
+    s3 = build_s3_client(config)
+
+    uploaded_keys: List[str] = []
+    buf = io.BytesIO()
+    buf_size = 0
+    part_idx = 0
+
+    def new_key() -> str:
+        nonlocal part_idx
+        part_idx += 1
+        fname = f"{base}_part-{part_idx:05d}.json"
+        return f"{prefix}/{fname}" if prefix else fname
+
+    def upload_current_buffer():
+        # uploads buf (positioned at 0) to a new key, records key for rollback
+        key = new_key()
+        log(debug, f"Uploading in-memory part -> s3://{bucket}/{key} ({buf_size} bytes)")
+        buf.seek(0)
+        s3.upload_fileobj(buf, bucket, key)  # boto3 handles multipart internally
+        uploaded_keys.append(key)
+        log(debug, f"Uploaded: s3://{bucket}/{key}")
+
+    try:
+        # verify bucket is reachable upfront
+        s3.head_bucket(Bucket=bucket)
+
+        for batch in fetch_batches(api_url, token, start_time, end_time,
+                                   page_size=page_size, timeout=timeout, debug=debug,
+                                   extra_params=extra):
+            for rec in batch:
+                line = dumps_line(rec)
+                # rotate if adding this line would exceed the cap and we already have content
+                if buf_size > 0 and (buf_size + len(line) > part_max):
+                    # finalize & upload current buffer
+                    upload_current_buffer()
+                    # start a fresh buffer
+                    buf = io.BytesIO()
+                    buf_size = 0
+                # if a single line itself exceeds cap, still upload it alone
+                if buf_size == 0 and len(line) > part_max:
+                    buf.write(line)
+                    buf_size += len(line)
+                    upload_current_buffer()
+                    buf = io.BytesIO()
+                    buf_size = 0
+                    continue
+                # normal append
+                buf.write(line)
+                buf_size += len(line)
+
+        # last buffer
+        if buf_size > 0:
+            upload_current_buffer()
+
+        return uploaded_keys
+
+    except Exception as e:
+        log(debug, f"Failure during export: {e}. Rolling back {len(uploaded_keys)} uploaded object(s).")
+        # rollback: delete any objects we uploaded in this run
+        for key in uploaded_keys:
+            try:
+                s3.delete_object(Bucket=bucket, Key=key)
+                log(debug, f"Rolled back s3://{bucket}/{key}")
+            except Exception as de:
+                log(debug, f"Rollback failed for {key}: {de}")
+        raise
