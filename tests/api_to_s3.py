@@ -17,7 +17,6 @@ from zoneinfo import ZoneInfo
 import os
 import time
 import json
-import uuid
 import requests
 import boto3
 from contextlib import contextmanager
@@ -382,6 +381,8 @@ def merge_pages_to_parts(
                         if current_size > 0 and (current_size + line_len > part_max_bytes):
                             close_part()
                             open_new_part()
+                        if current_size == 0 and line_len > part_max_bytes:
+                            log(debug, f"Note: single record ({line_len} bytes) exceeds part_max_bytes={part_max_bytes}; writing as its own part.")
                         current_fp.write(line)
                         current_size += line_len
             except OSError as e:
@@ -419,6 +420,7 @@ def upload_parts_to_s3(
     debug: bool,
 ) -> List[str]:
     keys: List[str] = []
+    prefix = (prefix or "").strip("/")
     
     # Validate bucket exists
     try:
@@ -508,6 +510,9 @@ def export_api_to_s3_two_phase(config: Dict[str, Any], record: Dict[str, Any]) -
             end_s   = normalize_time(record["end_time"], tz_name)
         except Exception as e:
             raise ValueError(f"Invalid time configuration: {e}")
+        # Fail fast if range is inverted (string compare is OK for this format)
+        if start_s > end_s:
+            raise ValueError(f"start_time '{start_s}' is after end_time '{end_s}'")
 
         # naming and prefix
         index_name = config.get("index_name", "dataset")
@@ -521,28 +526,31 @@ def export_api_to_s3_two_phase(config: Dict[str, Any], record: Dict[str, Any]) -
         headers = build_headers(access_token)
         params  = build_params(start_s, end_s, page_size, config.get("extra_query_params"))
 
-        session = requests.Session()
-
-        # Phase 0: preflight
-        _ = preflight_total_count(
-            session, api_url, headers, dict(params),
-            timeout=timeout, backoff_base=backoff_base, max_retries=max_retries, debug=debug
-        )
-
-        # S3 client (username/password)
+        # Create S3 client (username/password)
         s3 = build_s3_client_userpass(config)
 
-        # PHASE 1: Write pages to disk
-        log(debug, "\n=== PHASE 1: Writing pages to disk ===")
-        page_paths, total_rows = write_pages_to_disk(
-            session, api_url, headers, params, local_dir, base_name,
-            timeout=timeout, backoff_base=backoff_base, max_retries=max_retries, debug=debug,
-        )
-        log(debug, f"Phase 1 complete. Pages: {len(page_paths)}; Rows: {total_rows}")
+        # Use a managed HTTP session and ensure it closes
+        with requests.Session() as session:
+            # Phase 0: preflight
+            total = preflight_total_count(
+                session, api_url, headers, dict(params),
+                timeout=timeout, backoff_base=backoff_base, max_retries=max_retries, debug=debug
+            )
+            if total:
+                expected_pages = (total + page_size - 1) // page_size
+                log(debug, f"Expected rows: {total} (~{expected_pages} pages at page_size={page_size})")
 
-        if not page_paths:
-            log(debug, "No data retrieved; nothing to merge/upload.")
-            return []
+            # PHASE 1: Write pages to disk
+            log(debug, "\n=== PHASE 1: Writing pages to disk ===")
+            page_paths, total_rows = write_pages_to_disk(
+                session, api_url, headers, params, local_dir, base_name,
+                timeout=timeout, backoff_base=backoff_base, max_retries=max_retries, debug=debug,
+            )
+            log(debug, f"Phase 1 complete. Pages: {len(page_paths)}; Rows: {total_rows}")
+
+            if not page_paths:
+                log(debug, "No data retrieved; nothing to merge/upload.")
+                return []
 
         # PHASE 2: Merge pages into parts
         log(debug, "\n=== PHASE 2: Merging pages into parts ===")
@@ -577,8 +585,3 @@ def export_api_to_s3_two_phase(config: Dict[str, Any], record: Dict[str, Any]) -
         else:
             log(debug, "No local files to cleanup.")
         raise
-
-
-
-
-
