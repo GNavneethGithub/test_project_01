@@ -2,6 +2,131 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from datetime import datetime
 import io, os, time, json, requests, boto3
 
+
+
+
+
+
+
+
+
+def get_total_record_count(config: Dict[str, Any], record: Dict[str, Any]) -> int:
+    """
+    Return the total number of matching records.
+
+    Tries in order:
+      1) Header probe: GET with limit=1 and read total from a response header (default 'X-Total-Count').
+      2) Optional count endpoint: if config['count_endpoint'] is provided, call it and parse common fields.
+      3) Fallback pagination: page through results with minimal fields and count rows.
+
+    Required in config: api_url, access_token
+    Required in record: start_time, end_time
+    Optional in config:
+      - page_size (default 1000)
+      - timeout (default 30)
+      - request_backoff_base (default 1.0)
+      - request_max_retries (default 5)
+      - extra_query_params (dict)
+      - timezone (IANA tz name)
+      - total_count_header (default "X-Total-Count")
+      - count_endpoint (URL to hit for count, same query semantics as api_url)
+      - count_fields (default "sys_id")  # used only by pagination fallback
+      - debug (default True)
+    """
+    debug = bool(config.get("debug", True))
+    api_url = config["api_url"]
+    token = config["access_token"]
+    tz_name = config.get("timezone")
+    page_size = int(config.get("page_size", 1000))
+    timeout = int(config.get("timeout", 30))
+    backoff_base = float(config.get("request_backoff_base", 1.0))
+    max_retries = int(config.get("request_max_retries", 5))
+    extra_params = config.get("extra_query_params") or {}
+    header_name = config.get("total_count_header", "X-Total-Count")
+    count_endpoint = config.get("count_endpoint")  # optional
+
+    # Use your existing helpers:
+    start_s = normalize_time(record["start_time"], tz_name)
+    end_s   = normalize_time(record["end_time"], tz_name)
+    headers = build_headers(token)
+    base_params = build_params(start_s, end_s, page_size, extra_params)
+
+    # ---- 1) Header probe (limit=1) ----
+    probe = dict(base_params)
+    probe["sysparm_limit"] = 1
+    with requests.Session() as session:
+        try:
+            resp = request_with_retry(
+                session, "GET", api_url,
+                timeout=timeout, backoff_base=backoff_base, max_retries=max_retries, debug=debug,
+                headers=headers, params=probe,
+            )
+            resp.raise_for_status()
+            if header_name in resp.headers:
+                try:
+                    total = int(resp.headers[header_name])
+                    log(debug, f"Count (via header {header_name}): {total}")
+                    return total
+                except ValueError:
+                    log(debug, f"Header {header_name} not integer: {resp.headers[header_name]}")
+        except Exception as e:
+            log(debug, f"Header probe failed: {e}")
+
+        # ---- 2) Optional count endpoint ----
+        if count_endpoint:
+            try:
+                # Reuse same query; some APIs support flags like sysparm_count=true
+                count_params = dict(base_params)
+                count_params["sysparm_limit"] = 1
+                count_params.setdefault("sysparm_fields", "sys_id")
+                # Uncomment if your backend supports it:
+                # count_params["sysparm_count"] = "true"
+
+                r = request_with_retry(
+                    session, "GET", count_endpoint,
+                    timeout=timeout, backoff_base=backoff_base, max_retries=max_retries, debug=debug,
+                    headers=headers, params=count_params,
+                )
+                r.raise_for_status()
+                j = r.json()
+                for k in ("count", "total", "total_count", "result_count"):
+                    if isinstance(j, dict) and k in j:
+                        try:
+                            total = int(j[k])
+                            log(debug, f"Count (via endpoint {k}): {total}")
+                            return total
+                        except ValueError:
+                            pass
+                log(debug, "Count endpoint returned no usable total; falling back to pagination.")
+            except Exception as e:
+                log(debug, f"Count endpoint failed: {e}; falling back to pagination.")
+
+        # ---- 3) Fallback pagination count (minimal fields) ----
+        params = dict(base_params)
+        params["sysparm_fields"] = config.get("count_fields", "sys_id")
+        count = 0
+        while True:
+            resp = request_with_retry(
+                session, "GET", api_url,
+                timeout=timeout, backoff_base=backoff_base, max_retries=max_retries, debug=debug,
+                headers=headers, params=params,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            batch = data.get("result") or []
+            n = len(batch)
+            count += n
+            log(debug, f"Counted {n} (running total {count}) offset={params['sysparm_offset']}")
+            if n == 0:
+                break
+            params["sysparm_offset"] = int(params.get("sysparm_offset", 0)) + int(params["sysparm_limit"])
+
+        log(debug, f"Count (via pagination): {count}")
+        return count
+
+
+
+
 # ---------- small helpers ----------
 def log(debug: bool, *a: Any) -> None:
     if debug:
