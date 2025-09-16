@@ -1,0 +1,114 @@
+# one_hour_gantt.py
+# Goal: assign each DAG a start time within a 60-minute window (all run hourly),
+# pack them into as few lanes as possible, and plot a one-hour Gantt.
+# No seaborn. One chart. No custom colors.
+
+import re
+import math
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ---- Input (from your sheet) ----
+ROWS = [
+    {"group":"iq","dag":"APPPROFILE_GUARANTEED_SLOTS","runtime":"1m:40s"},
+    {"group":"iq","dag":"CLUSTER_CONFIG","runtime":"2m:30s"},
+    {"group":"iq","dag":"COMPLETED_JOBS_HELIOS","runtime":"7m:40s"},
+    {"group":"iq","dag":"PENDING_JOBS","runtime":"2m:10s"},
+    {"group":"iq","dag":"PENDING_JOBS_REASON","runtime":"22m:30s"},
+    {"group":"iq","dag":"RUNNING_JOBS","runtime":"18m:30s"},
+    {"group":"iq","dag":"USER_FAIR_SHARE","runtime":"20m:40s"},
+    {"group":"CPT","dag":"LSF_METRICS","runtime":"2m:30s"},
+    {"group":"CPT","dag":"METRICS","runtime":"1m:50s"},
+    {"group":"CPT","dag":"ROLLUP_METRICS","runtime":"12m:50s"},
+    {"group":"CPT","dag":"SAIKVSTORE","runtime":"1m:50s"},
+    {"group":"CPT","dag":"ODC_INVENTORY","runtime":"3m:10s"},
+    {"group":"CPT","dag":"HOST_INVENTORY","runtime":"2m:40s"},
+    {"group":"STOGx","dag":"STOGx_METRICS","runtime":"2m:40s"},
+    {"group":"SERVICE_NOW","dag":"INCIDENT_HF","runtime":"1m:10s"},
+    {"group":"SERVICE_NOW","dag":"REQUESTED_ITEM_HF","runtime":"2m:40s"},
+    {"group":"SERVICE_NOW","dag":"REQUEST_HF","runtime":"1m:50s"},
+]
+
+UNITS = {"d":86400,"h":3600,"m":60,"s":1}
+
+def parse_duration_to_seconds(s: str) -> int:
+    s = s.strip().lower().replace(":", " ")
+    total = 0
+    for num, unit in re.findall(r"(\d+)\s*([dhms])", s):
+        total += int(num) * UNITS[unit]
+    return total
+
+def mmss(t_min: float) -> str:
+    m = int(t_min)
+    s = int(round((t_min - m) * 60))
+    if s == 60:
+        m += 1
+        s = 0
+    return f"{m:02d}:{s:02d}"
+
+# ---- Build DF ----
+df = pd.DataFrame(ROWS)
+df["runtime_s"] = df["runtime"].apply(parse_duration_to_seconds)
+df["runtime_min"] = df["runtime_s"] / 60.0
+df["dag_label"] = df["group"] + " | " + df["dag"]
+
+# ---- Pack into a 60-minute window with minimal lanes (First-Fit Decreasing) ----
+HORIZON_MIN = 60.0
+tasks = list(df[["dag_label","runtime_min"]].itertuples(index=False, name=None))
+tasks.sort(key=lambda t: t[1], reverse=True)  # longest first
+
+lanes = []  # each lane: {"load": minutes_used, "items": [(label, start_min, dur_min)]}
+for label, dur in tasks:
+    placed = False
+    lanes.sort(key=lambda L: L["load"])
+    for lane in lanes:
+        if lane["load"] + dur <= HORIZON_MIN:
+            start = lane["load"]
+            lane["items"].append((label, start, dur))
+            lane["load"] += dur
+            placed = True
+            break
+    if not placed:
+        lanes.append({"load": dur, "items":[(label, 0.0, dur)]})
+
+# ---- Build schedule table ----
+rows = []
+for lane_idx, lane in enumerate(lanes, start=1):
+    for label, start, dur in lane["items"]:
+        rows.append({
+            "lane": lane_idx,
+            "dag_label": label,
+            "start_min": start,
+            "end_min": start + dur,
+            "duration_min": dur,
+            "cron_minute": int(start) % 60,
+            "second_offset": int(round((start - int(start))*60)),
+        })
+sched = pd.DataFrame(rows).sort_values(["lane","start_min"]).reset_index(drop=True)
+
+# Save for reference
+sched.to_csv("one_hour_gantt_schedule.csv", index=False)
+print("Wrote one_hour_gantt_schedule.csv")
+print("\nRecommended offsets (minute + seconds within the hour):")
+for _, r in sched.sort_values("start_min").iterrows():
+    print(f"{r['dag_label']}: start {mmss(r['start_min'])}  ->  end {mmss(r['end_min'])}  "
+          f"(cron minute {r['cron_minute']:02d} +{r['second_offset']:02d}s)")
+
+# ---- Plot one-hour Gantt ----
+plt.figure(figsize=(14, max(6, 0.35 * len(sched))))
+sched_plot = sched.sort_values("start_min").reset_index(drop=True)
+for i, row in sched_plot.iterrows():
+    left = row["start_min"]
+    width = row["duration_min"]
+    plt.barh(i, width, left=left)
+    plt.text(left, i, mmss(left), va="center", ha="right", fontsize=8)
+    plt.text(left+width, i, mmss(left+width), va="center", ha="left", fontsize=8)
+
+plt.yticks(np.arange(len(sched_plot)), sched_plot["dag_label"])
+plt.xlabel("Within-hour time (minutes)")
+plt.title("One-hour Gantt: recommended start offsets (all DAGs run hourly)")
+plt.xlim(0, 60)
+plt.xticks(range(0, 61, 5))
+plt.tight_layout()
+plt.show()
