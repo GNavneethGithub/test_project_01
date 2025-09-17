@@ -1,46 +1,97 @@
 
-# save as list_sys_tables.py
-import requests
 
-INSTANCE = "compnay_name"               # change to your instance (no .service-now.com)
-TOKEN = "YOUR_BEARER_TOKEN"         # change to your token or use Basic Auth instead
+# probe_history_audit_tables.py
+import requests, json, pprint, time
 
-URL = f"https://{INSTANCE}.service-now.com/api/now/table/sys_db_object"
+INSTANCE = "synopsys"          # no .service-now.com
+TOKEN = "YOUR_BEARER_TOKEN"
+
 HEADERS = {"Accept": "application/json", "Authorization": f"Bearer {TOKEN}"}
+CANDIDATES = [
+    "sys_history_set",
+    "sys_history_line",
+    "sys_journal_field",
+    "sys_audit",
+    "sys_audit_relation",
+    "sys_audit_role",
+    "sys_upgrade_history",
+    "sys_scheduler_job_history"
+]
 
-def list_sys_tables(page_size=200):
-    offset = 0
-    all_rows = []
-    while True:
-        params = {
-            "sysparm_query": "nameLIKEsys",           # finds table names containing "sys"
-            "sysparm_fields": "name,label",
-            "sysparm_limit": page_size,
-            "sysparm_offset": offset
-        }
-        r = requests.get(URL, headers=HEADERS, params=params, timeout=30)
-        print(f"HTTP {r.status_code} -> offset={offset} limit={page_size}")
-        if r.status_code != 200:
-            print("ERROR body:", r.text)
-            return None
-
-        data = r.json().get("result", [])
-        if not data:
-            break
-        all_rows.extend(data)
-        if len(data) < page_size:
-            break
-        offset += page_size
-
-    return all_rows
+def probe(table):
+    url = f"https://{INSTANCE}.service-now.com/api/now/table/{table}"
+    params = {"sysparm_limit": 1}
+    r = requests.get(url, headers=HEADERS, params=params, timeout=30)
+    return r.status_code, r.text
 
 if __name__ == "__main__":
-    rows = list_sys_tables()
-    if rows is None:
-        raise SystemExit("Failed to fetch table list — check token/permissions.")
-    print(f"Found {len(rows)} tables containing 'sys':")
-    for r in rows:
-        print(r.get("name"), "-", r.get("label"))
+    for t in CANDIDATES:
+        status, body = probe(t)
+        print(f"{t} -> HTTP {status}")
+        try:
+            j = json.loads(body)
+        except Exception:
+            print("  (non-JSON response, truncated):", body[:400])
+            continue
+        res = j.get("result", [])
+        if res:
+            print("  >>> non-empty. Sample record from", t)
+            pprint.pprint(res[0])
+            break
+        else:
+            print("  empty result")
+        time.sleep(0.15)
+    else:
+        print("No candidate returned rows. Likely: auditing disabled, retention cleaned, or ACLs hide rows.")
+
+
+
+
+
+
+
+# # save as list_sys_tables.py
+# import requests
+
+# INSTANCE = "compnay_name"               # change to your instance (no .service-now.com)
+# TOKEN = "YOUR_BEARER_TOKEN"         # change to your token or use Basic Auth instead
+
+# URL = f"https://{INSTANCE}.service-now.com/api/now/table/sys_db_object"
+# HEADERS = {"Accept": "application/json", "Authorization": f"Bearer {TOKEN}"}
+
+# def list_sys_tables(page_size=200):
+#     offset = 0
+#     all_rows = []
+#     while True:
+#         params = {
+#             "sysparm_query": "nameLIKEsys",           # finds table names containing "sys"
+#             "sysparm_fields": "name,label",
+#             "sysparm_limit": page_size,
+#             "sysparm_offset": offset
+#         }
+#         r = requests.get(URL, headers=HEADERS, params=params, timeout=30)
+#         print(f"HTTP {r.status_code} -> offset={offset} limit={page_size}")
+#         if r.status_code != 200:
+#             print("ERROR body:", r.text)
+#             return None
+
+#         data = r.json().get("result", [])
+#         if not data:
+#             break
+#         all_rows.extend(data)
+#         if len(data) < page_size:
+#             break
+#         offset += page_size
+
+#     return all_rows
+
+# if __name__ == "__main__":
+#     rows = list_sys_tables()
+#     if rows is None:
+#         raise SystemExit("Failed to fetch table list — check token/permissions.")
+#     print(f"Found {len(rows)} tables containing 'sys':")
+#     for r in rows:
+#         print(r.get("name"), "-", r.get("label"))
 
 
 
