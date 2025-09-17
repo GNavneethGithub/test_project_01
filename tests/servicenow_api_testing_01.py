@@ -3,7 +3,7 @@
 # probe_history_audit_tables.py
 import requests, json, pprint, time
 
-INSTANCE = "synopsys"          # no .service-now.com
+INSTANCE = "compnay_name"          # no .service-now.com
 TOKEN = "YOUR_BEARER_TOKEN"
 
 HEADERS = {"Accept": "application/json", "Authorization": f"Bearer {TOKEN}"}
