@@ -1,48 +1,66 @@
 
 
-# probe_history_audit_tables.py
-import requests, json, pprint, time
 
-INSTANCE = "compnay_name"          # no .service-now.com
+
+
+import requests, json, pprint
+INST = "compnay_name"
 TOKEN = "YOUR_BEARER_TOKEN"
+HEADERS = {"Accept":"application/json","Authorization":f"Bearer {TOKEN}"}
 
-HEADERS = {"Accept": "application/json", "Authorization": f"Bearer {TOKEN}"}
-CANDIDATES = [
-    "sys_history_set",
-    "sys_history_line",
-    "sys_journal_field",
-    "sys_audit",
-    "sys_audit_relation",
-    "sys_audit_role",
-    "sys_upgrade_history",
-    "sys_scheduler_job_history"
-]
+url = f"https://{INST}.service-now.com/api/now/table/sys_history_line"
+params = {
+  "sysparm_limit": 10,
+  "sysparm_fields": "sys_id,sys_created_on,user_name,user_id,field,label,old,old_value,new,new_value,type,relation,update_time"
+}
+r = requests.get(url, headers=HEADERS, params=params, timeout=30)
+print("HTTP", r.status_code)
+pprint.pprint(r.json())
 
-def probe(table):
-    url = f"https://{INSTANCE}.service-now.com/api/now/table/{table}"
-    params = {"sysparm_limit": 1}
-    r = requests.get(url, headers=HEADERS, params=params, timeout=30)
-    return r.status_code, r.text
 
-if __name__ == "__main__":
-    for t in CANDIDATES:
-        status, body = probe(t)
-        print(f"{t} -> HTTP {status}")
-        try:
-            j = json.loads(body)
-        except Exception:
-            print("  (non-JSON response, truncated):", body[:400])
-            continue
-        res = j.get("result", [])
-        if res:
-            print("  >>> non-empty. Sample record from", t)
-            pprint.pprint(res[0])
-            break
-        else:
-            print("  empty result")
-        time.sleep(0.15)
-    else:
-        print("No candidate returned rows. Likely: auditing disabled, retention cleaned, or ACLs hide rows.")
+# # probe_history_audit_tables.py
+# import requests, json, pprint, time
+
+# INSTANCE = "compnay_name"          # no .service-now.com
+# TOKEN = "YOUR_BEARER_TOKEN"
+
+# HEADERS = {"Accept": "application/json", "Authorization": f"Bearer {TOKEN}"}
+# CANDIDATES = [
+#     "sys_history_set",
+#     "sys_history_line",
+#     "sys_journal_field",
+#     "sys_audit",
+#     "sys_audit_relation",
+#     "sys_audit_role",
+#     "sys_upgrade_history",
+#     "sys_scheduler_job_history"
+# ]
+
+# def probe(table):
+#     url = f"https://{INSTANCE}.service-now.com/api/now/table/{table}"
+#     params = {"sysparm_limit": 1}
+#     r = requests.get(url, headers=HEADERS, params=params, timeout=30)
+#     return r.status_code, r.text
+
+# if __name__ == "__main__":
+#     for t in CANDIDATES:
+#         status, body = probe(t)
+#         print(f"{t} -> HTTP {status}")
+#         try:
+#             j = json.loads(body)
+#         except Exception:
+#             print("  (non-JSON response, truncated):", body[:400])
+#             continue
+#         res = j.get("result", [])
+#         if res:
+#             print("  >>> non-empty. Sample record from", t)
+#             pprint.pprint(res[0])
+#             break
+#         else:
+#             print("  empty result")
+#         time.sleep(0.15)
+#     else:
+#         print("No candidate returned rows. Likely: auditing disabled, retention cleaned, or ACLs hide rows.")
 
 
 
