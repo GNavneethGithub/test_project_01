@@ -1,9 +1,9 @@
 # Simplest test: fetch any audit row (no filters)
 import requests, json
-INSTANCE = 'synopsys'
+INSTANCE = 'compnay_name'
 TOKEN = 'YOUR_BEARER_TOKEN'
 
-url = f'https://{INSTANCE}.service-now.com/api/now/table/sys_audit'
+url = f'https://{INSTANCE}.service-now.com/api/now/table/xyz'
 params = {'sysparm_limit': 1}
 headers = {'Accept': 'application/json', 'Authorization': f'Bearer {TOKEN}'}
 
@@ -14,7 +14,7 @@ print(r.text)   # full raw body for debugging
 
 
 
-# Check another table (confirm API and permissions) — if incident returns a record, API/auth is fine and problem is sys_audit-specific:
+# Check another table (confirm API and permissions) — if incident returns a record, API/auth is fine and problem is xyz-specific:
 url2 = f'https://{INSTANCE}.service-now.com/api/now/table/incident'
 r2 = requests.get(url2, params={'sysparm_limit':1}, headers=headers, timeout=30)
 print('HTTP', r2.status_code)
@@ -26,7 +26,7 @@ from datetime import datetime, timedelta
 now_utc = datetime.utcnow()
 t0 = (now_utc - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')   # last 7 days
 query = f"sys_created_on>={t0}"
-r3 = requests.get(f'https://{INSTANCE}.service-now.com/api/now/table/sys_audit',
+r3 = requests.get(f'https://{INSTANCE}.service-now.com/api/now/table/xyz',
                   params={'sysparm_query': query, 'sysparm_limit': 5},
                   headers=headers, timeout=30)
 print('HTTP', r3.status_code)
