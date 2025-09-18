@@ -1,21 +1,228 @@
+import requests, json, time, argparse
+from datetime import datetime, timedelta
 
+# --------------- CONFIG ----------------
+INSTANCE = "compnay_name"            # change to your instance name (no .service-now.com)
+TOKEN = "YOUR_BEARER_TOKEN"      # change to your bearer token (or change script to use Basic Auth)
+DEFAULT_TABLE = "sys_history_line"
+PAGE_SIZE = 200
+# ---------------------------------------
 
-
-
-
-import requests, json, pprint
-INST = "compnay_name"
-TOKEN = "YOUR_BEARER_TOKEN"
-HEADERS = {"Accept":"application/json","Authorization":f"Bearer {TOKEN}"}
-
-url = f"https://{INST}.service-now.com/api/now/table/sys_history_line"
-params = {
-  "sysparm_limit": 10,
-  "sysparm_fields": "sys_id,sys_created_on,user_name,user_id,field,label,old,old_value,new,new_value,type,relation,update_time"
+HEADERS = {
+    "Accept": "application/json",
+    "Authorization": f"Bearer {TOKEN}"
 }
-r = requests.get(url, headers=HEADERS, params=params, timeout=30)
-print("HTTP", r.status_code)
-pprint.pprint(r.json())
+
+def parse_duration(s):
+    """Parse duration strings like '30m', '1h', '2d' -> timedelta."""
+    if s is None:
+        return None
+    s = s.strip().lower()
+    if s.endswith('m'):
+        return timedelta(minutes=int(s[:-1]))
+    if s.endswith('h'):
+        return timedelta(hours=int(s[:-1]))
+    if s.endswith('d'):
+        return timedelta(days=int(s[:-1]))
+    # allow plain minutes
+    try:
+        return timedelta(minutes=int(s))
+    except:
+        raise ValueError("Duration must be like 30m, 1h, 2d or integer minutes")
+
+def parse_dt(s):
+    """Parse 'YYYY-MM-DD HH:MM:SS' in UTC -> datetime (naive, but treated as UTC)."""
+    if s is None:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(s, fmt)
+        except Exception:
+            pass
+    raise ValueError("Datetime must be 'YYYY-MM-DD HH:MM:SS' (UTC) or ISO 'YYYY-MM-DDTHH:MM:SS'")
+
+def build_query(start_dt, end_dt):
+    """ServiceNow query for sys_created_on between start and end (inclusive)."""
+    s = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+    e = end_dt.strftime("%Y-%m-%d %H:%M:%S")
+    return f"sys_created_on>={s}^sys_created_on<={e}"
+
+def fetch_window(instance, token, table, start_dt, end_dt, out_path, page_size=PAGE_SIZE):
+    url = f"https://{instance}.service-now.com/api/now/table/{table}"
+    headers = {"Accept": "application/json", "Authorization": f"Bearer {token}"}
+    query = build_query(start_dt, end_dt)
+    offset = 0
+    total = 0
+    with open(out_path, "w", encoding="utf-8") as fh:
+        while True:
+            params = {
+                "sysparm_query": query,
+                "sysparm_limit": page_size,
+                "sysparm_offset": offset,
+                "sysparm_display_value": "true",
+                "sysparm_exclude_reference_link": "true"
+                # omit sysparm_fields to get all fields for each row
+            }
+            r = requests.get(url, headers=headers, params=params, timeout=60)
+            print(f"HTTP {r.status_code} offset={offset} limit={page_size}")
+            if r.status_code == 200:
+                payload = r.json()
+                chunk = payload.get("result", []) or []
+                if not chunk:
+                    break
+                for rec in chunk:
+                    fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                total += len(chunk)
+                if len(chunk) < page_size:
+                    break
+                offset += page_size
+                time.sleep(0.12)
+            elif r.status_code in (401, 403):
+                print("Auth/permission error:", r.status_code)
+                print("Response (truncated):", r.text[:1000])
+                raise SystemExit("Fix token/permissions and retry.")
+            else:
+                print("Unexpected status", r.status_code)
+                print("Response (truncated):", r.text[:1000])
+                raise SystemExit("Aborting due to unexpected response.")
+    return total
+
+# def main():
+#     p = argparse.ArgumentParser(description="Fetch ServiceNow table rows for a time window and save NDJSON.")
+#     p.add_argument("--table", default=DEFAULT_TABLE, help="Table to query (default sys_history_line)")
+#     p.add_argument("--duration", help="Relative duration like 30m, 1h, 2d (used as 'last DURATION' when no start or with start to define window)")
+#     p.add_argument("--start", help="UTC start datetime 'YYYY-MM-DD HH:MM:SS' (optional)")
+#     p.add_argument("--end", help="UTC end datetime 'YYYY-MM-DD HH:MM:SS' (optional). If omitted and duration provided, end = start+duration or now.")
+#     p.add_argument("--out", default="history_window.ndjson", help="Output NDJSON file path")
+#     p.add_argument("--instance", default=INSTANCE, help="ServiceNow instance (no .service-now.com)")
+#     p.add_argument("--token", default=TOKEN, help="Bearer token (will override TOKEN in script if provided)")
+#     args = p.parse_args()
+
+#     dur = parse_duration(args.duration) if args.duration else None
+#     start = parse_dt(args.start) if args.start else None
+#     end = parse_dt(args.end) if args.end else None
+
+#     # compute window logic:
+#     if start and end:
+#         pass  # use as provided
+#     elif start and dur:
+#         end = start + dur
+#     elif dur and not start:
+#         end = datetime.utcnow()
+#         start = end - dur
+#     elif start and not end:
+#         # use start -> now
+#         end = datetime.utcnow()
+#     else:
+#         # default: past 1 hour
+#         end = datetime.utcnow()
+#         start = end - timedelta(hours=1)
+
+#     # final sanity
+#     if start >= end:
+#         raise SystemExit("Start must be before end.")
+
+#     print("Query window (UTC):", start.strftime("%Y-%m-%d %H:%M:%S"), "->", end.strftime("%Y-%m-%d %H:%M:%S"))
+#     total = fetch_window(args.instance, args.token, args.table, start, end, args.out)
+#     print(f"Done. Wrote {total} records to {args.out}")
+
+
+def main(cli_args=None):
+    """If cli_args is None: parse sys.argv (normal CLI run).
+       If cli_args is a list: parse that list (programmatic call)."""
+    p = argparse.ArgumentParser(description="Fetch ServiceNow table rows for a time window and save NDJSON.")
+    p.add_argument("--table", default=DEFAULT_TABLE, help="Table to query (default sys_history_line)")
+    p.add_argument("--duration", help="Relative duration like 30m, 1h, 2d")
+    p.add_argument("--start", help="UTC start datetime 'YYYY-MM-DD HH:MM:SS'")
+    p.add_argument("--end", help="UTC end datetime 'YYYY-MM-DD HH:MM:SS'")
+    p.add_argument("--out", default="history_window.ndjson", help="Output NDJSON file path")
+    p.add_argument("--instance", default=INSTANCE, help="ServiceNow instance (no .service-now.com)")
+    p.add_argument("--token", default=TOKEN, help="Bearer token (overrides TOKEN in script if provided)")
+    args = p.parse_args(cli_args)
+
+    # Now reuse the same logic you already had to compute start/end and call fetch_window(...)
+    dur = parse_duration(args.duration) if args.duration else None
+    start = parse_dt(args.start) if args.start else None
+    end = parse_dt(args.end) if args.end else None
+
+    # compute window
+    if start and end:
+        pass
+    elif start and dur:
+        end = start + dur
+    elif dur and not start:
+        end = datetime.utcnow()
+        start = end - dur
+    elif start and not end:
+        end = datetime.utcnow()
+    else:
+        end = datetime.utcnow()
+        start = end - timedelta(hours=1)
+
+    if start >= end:
+        raise SystemExit("Start must be before end.")
+
+    print("Query window (UTC):", start.strftime("%Y-%m-%d %H:%M:%S"), "->", end.strftime("%Y-%m-%d %H:%M:%S"))
+    total = fetch_window(args.instance, args.token, args.table, start, end, args.out)
+    print(f"Done. Wrote {total} records to {args.out}")
+
+# -----------------------------
+# Two ways to run from __main__:
+# 1) Normal CLI run (click Run / Run File or run in terminal):
+#    python fetch_history_ndjson.py --duration 30m --out out.ndjson --instance synopsys --token ABC
+#
+# 2) Programmatic: send the argument list from __main__ (this is what you wanted):
+#    main(['--duration','30m','--out','out.ndjson','--instance','synopsys','--token','ABC'])
+# -----------------------------
+
+# if __name__ == "__main__":
+#     # Option A: simply use CLI / VS Code Run button (parses sys.argv)
+#     main()
+
+#     # Option B: pass args programmatically (uncomment to use)
+#     main(['--duration', '30m', '--out', 'history_last_30m.ndjson',
+#           '--instance', 'synopsys', '--token', 'YOUR_BEARER_TOKEN'])
+
+
+if __name__ == "__main__":
+    main([
+      '--start', '2025-09-17 09:30:00',
+      '--end',   '2025-09-17 10:00:00',
+      '--out',  'yesterday_window.ndjson',
+      '--instance','synopsys',
+      '--token','YOUR_TOKEN'
+    ])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# import requests, json, pprint
+# INST = "compnay_name"
+# TOKEN = "YOUR_BEARER_TOKEN"
+# HEADERS = {"Accept":"application/json","Authorization":f"Bearer {TOKEN}"}
+
+# url = f"https://{INST}.service-now.com/api/now/table/sys_history_line"
+# params = {
+#   "sysparm_limit": 10,
+#   "sysparm_fields": "sys_id,sys_created_on,user_name,user_id,field,label,old,old_value,new,new_value,type,relation,update_time"
+# }
+# r = requests.get(url, headers=HEADERS, params=params, timeout=30)
+# print("HTTP", r.status_code)
+# pprint.pprint(r.json())
 
 
 # # probe_history_audit_tables.py
