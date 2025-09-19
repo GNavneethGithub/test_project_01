@@ -185,10 +185,14 @@ def main(cli_args=None):
 
 
 if __name__ == "__main__":
+    start_ts = '2025-09-17 09:30:00'
+    end_ts = '2025-09-17 10:00:00'
+    start_ts_str = start_ts.replace(' ', '_').replace(':', '-')
+    end_ts_str = end_ts.replace(' ', '_').replace(':', '-')
     main([
-      '--start', '2025-09-17 09:30:00',
-      '--end',   '2025-09-17 10:00:00',
-      '--out',  'yesterday_window.ndjson',
+      '--start', start_ts,
+      '--end',   end_ts,
+      '--out',  '{DEFAULT_TABLE}_{start_ts_str}_{end_ts_str}.ndjson',
       '--instance','synopsys',
       '--token','YOUR_TOKEN'
     ])
