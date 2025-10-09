@@ -1,0 +1,14 @@
+excel:
+  # ---------- DEFAULTS (auto-applied if omitted) ----------
+  timezone: "UTC"
+  date_formats: ["YYYY-MM-DDTHH:MM:SSZ", "DD/MM/YYYY HH:MM:SS", "MM/DD/YYYY HH:MM:SS"]
+  header_row: 1          # 1-based
+  skip_rows: 0
+  pdf_link_column: "servicenow_link"
+
+  # ---------- REQUIRED (must provide) ----------
+  worksheets:
+    - name: "worksheet1"
+      required_columns: ["ticket_id","priority","owner","updated_at","servicenow_link"]
+      # hash_columns optional; if omitted => defaults to required_columns minus pdf_link_column
+      hash_columns: ["ticket_id","priority","owner","updated_at"]
