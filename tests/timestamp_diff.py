@@ -3,7 +3,6 @@ from typing import Optional, Tuple
 from zoneinfo import ZoneInfo  # Python 3.9+
 import sys
 
-
 def _parse_iso_to_dt(iso: str, assumed_tz: Optional[str] = None) -> datetime:
     """
     Parse ISO-8601 string to an aware datetime.
@@ -67,6 +66,17 @@ def diff_between_iso(
     td = dt1.astimezone(target) - dt2.astimezone(target)
     secs = int(td.total_seconds())
     return td, secs
+
+
+tz = ZoneInfo("Asia/Kolkata")         # or ZoneInfo("America/Los_Angeles")
+now = datetime.now(tz)                # timezone-aware datetime
+
+iso_full = now.isoformat()             # includes offset and microseconds
+iso_seconds = now.isoformat(timespec="seconds")  # seconds precision, e.g. "2025-10-14T14:33:21+05:30"
+
+print(iso_full)
+print(iso_seconds)
+
 
 if __name__ == "__main__":
     a = "2025-10-14T14:33:21+05:30"
