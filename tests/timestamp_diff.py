@@ -80,7 +80,7 @@ print(iso_seconds)
 
 if __name__ == "__main__":
     a = "2025-10-14T14:33:21+05:30"
-    b = "2025-10-14T14:30:00+05:30"
+    b = "2025-10-14T14:30:00+07:30"
     td, secs = diff_between_iso(a, b)
     print("timedelta:", td)
     print("seconds:", secs)
