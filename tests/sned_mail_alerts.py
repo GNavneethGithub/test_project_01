@@ -99,3 +99,25 @@ def send_email(
                 time.sleep(retry_delay_seconds)
     logger.error("Failed to send email after %d attempts", retries)
     raise last_exc
+
+
+
+
+# import os
+# from simple_email import send_email
+
+# send_email(
+#     subject="Alert: job failed",                # Subject
+#     sender="alerts@example.com",                # From address
+#     to=["dev1@example.com","dev2@example.com"], # Recipients
+#     text="Main message: job xyz failed at 10:12 UTC. Check logs.",  # Message body (plain text)
+#     smtp_server="mail.corp", port=587, starttls=True,
+#     username=os.environ.get("SMTP_USER"),
+#     password=os.environ.get("SMTP_PASS"),
+#     retries=3, retry_delay_seconds=5,
+# )
+
+
+
+
+
