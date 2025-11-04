@@ -6,6 +6,58 @@ import os
 
 
 
+from datetime import datetime, timedelta
+from typing import List, Tuple
+from zoneinfo import ZoneInfo 
+# Ensure you have 'pip install backports.zoneinfo' for Python < 3.9
+
+def generate_consecutive_daily_intervals(timezone_str: str, days_back_start: int = 8, days_back_end: int = 1) -> List[Tuple[str, str]]:
+    """
+    Generates a list of consecutive daily intervals starting from the 
+    beginning of the day 8 days ago up to the beginning of the day 1 day ago.
+
+    Args:
+        timezone_str: IANA Time Zone name (e.g., 'America/Los_Angeles').
+        days_back_start: The number of days before today to start the range (inclusive start).
+        days_back_end: The number of days before today to end the range (exclusive end).
+                      (e.g. 8 and 1 gives [T-8, T-7), [T-7, T-6), ... [T-2, T-1))
+
+    Returns:
+        A list of tuples with ISO 8601 formatted strings including timezone offsets.
+    """
+    try:
+        tz = ZoneInfo(timezone_str)
+        # Get 'now', then floor it to the start of the current day in that TZ
+        today_aware = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        start_date = today_aware - timedelta(days=days_back_start)
+        end_date = today_aware - timedelta(days=days_back_end)
+        
+        intervals = []
+        current_start = start_date
+        
+        while current_start < end_date:
+            current_end = current_start + timedelta(days=1)
+            intervals.append((current_start.isoformat(), current_end.isoformat()))
+            current_start = current_end
+            
+        return intervals
+
+    except Exception as e:
+        print(f"Error generating timestamps for timezone '{timezone_str}': {e}")
+        return []
+
+# # Example Usage:
+# timezone_input = 'America/Los_Angeles' 
+# generated_intervals = generate_consecutive_daily_intervals(timezone_input)
+
+# print(f"Generated {len(generated_intervals)} daily intervals in {timezone_input}:")
+# for interval in generated_intervals:
+#     print(interval)
+
+
+
+
 def build_single_interval_query_date_column(start_timestamp_iso: str, end_timestamp_iso: str) -> str:
     """
     Builds a Snowflake SQL query fragment for a single interval, 
