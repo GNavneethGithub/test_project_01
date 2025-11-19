@@ -1,6 +1,8 @@
+# my_main_project_folder/framework/snowflake_connector.py
+
 import snowflake.connector
 import traceback
-from utils.custom_logging import CustomChainLogger 
+from utils.custom_logging import CustomChainLogger, setup_logger
 
 
 def get_snowflake_connection(sf_con_parms: dict, logger: CustomChainLogger):
@@ -36,7 +38,8 @@ def get_snowflake_connection(sf_con_parms: dict, logger: CustomChainLogger):
         conn = snowflake.connector.connect(
             user=sf_con_parms.get("username"),
             password=sf_con_parms.get("password"),
-            account=sf_con_parms.get("account")
+            account=sf_con_parms.get("account"),
+            login_timeout=30  # Timeout after 30 seconds if connection fails
         )
         cursor = conn.cursor()
 
@@ -51,10 +54,8 @@ def get_snowflake_connection(sf_con_parms: dict, logger: CustomChainLogger):
         
         return return_object
 
-    # --- THIS BLOCK IS UPDATED based on your new code snippet ---
+
     except snowflake.connector.Error as e:
-        
-        # This creates the detailed message you want for an email
         error_details = traceback.format_exc()
         error_msg_for_email = (
             f"Snowflake Connection Failed (SnowflakeError)!\n\n"
@@ -68,7 +69,7 @@ def get_snowflake_connection(sf_con_parms: dict, logger: CustomChainLogger):
             f"--- Full Traceback ---\n{error_details}"
         )
         
-        # This logs the error to our custom log file
+
         log.error(
             "SNOWFLAKE_CONNECTION",
             "Snowflake connection failed.",
@@ -81,7 +82,6 @@ def get_snowflake_connection(sf_con_parms: dict, logger: CustomChainLogger):
 
         return_object['error_message'] = error_msg_for_email
         return return_object
-    # --- END OF UPDATED BLOCK ---
 
     except Exception as e:
         # This is a catch-all for any *other* non-Snowflake error
@@ -105,11 +105,10 @@ def get_snowflake_connection(sf_con_parms: dict, logger: CustomChainLogger):
         return_object['error_message'] = error_msg_for_email
         return return_object
 
+
 # --- Example of how to use this new file ---
-# This part will only run if you execute this script directly
+
 if __name__ == "__main__":
-    
-    from utils.custom_logging import setup_logger, CustomChainLogger
     
     base_logger = setup_logger()
     log_frame = CustomChainLogger(base_logger).new_frame("main_test_script")
@@ -119,7 +118,7 @@ if __name__ == "__main__":
     bad_sf_params = {
         "username": "BAD_USER",
         "password": "BAD_PASSWORD",
-        "account": "YOUR_ACCOUNT.snowflakecomputing.com" 
+        "account": "xy12345"  
     }
     
     result_fail = get_snowflake_connection(bad_sf_params, log_frame)

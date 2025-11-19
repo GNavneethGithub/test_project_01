@@ -58,14 +58,14 @@ def generate_consecutive_daily_intervals(timezone_str: str, days_back_start: int
 
 
 
-def build_single_interval_query_date_column(start_timestamp_iso: str, end_timestamp_iso: str) -> str:
+def build_single_interval_query_date_column(target_day: str, start_timestamp_iso_epoch: str, end_timestamp_iso_epoch: str) -> str:
     """
     Builds a Snowflake SQL query fragment for a single interval, 
     guaranteeing a row_count of 0 if no records are found within the specific interval.
     """
     query = f"""
     SELECT
-        '{start_timestamp_iso}'::TIMESTAMP_TZ::DATE AS target_day,
+        '{target_day}'::TIMESTAMP_TZ::DATE AS target_day,
         COALESCE(
             (
                 SELECT
@@ -73,8 +73,8 @@ def build_single_interval_query_date_column(start_timestamp_iso: str, end_timest
                 FROM
                     tb1
                 WHERE
-                    c_ts >= '{start_timestamp_iso}'::TIMESTAMP_TZ
-                    AND c_ts < '{end_timestamp_iso}'::TIMESTAMP_TZ
+                    c_ts >= '{start_timestamp_iso_epoch}'::TIMESTAMP_TZ
+                    AND c_ts < '{end_timestamp_iso_epoch}'::TIMESTAMP_TZ
             ), 
             0
         ) AS row_count
