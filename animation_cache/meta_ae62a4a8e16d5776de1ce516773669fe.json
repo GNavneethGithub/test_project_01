@@ -1,0 +1,20 @@
+{
+  "param_hash": "ae62a4a8e16d5776de1ce516773669fe",
+  "parameters": {
+    "f": 1.0,
+    "psiM": 60.0,
+    "psiC": 1.09,
+    "Dopsi": -90.0,
+    "psi0": 90.0,
+    "thetaM": 0.0,
+    "Dotheta": 0.0,
+    "thetaN": 1.0,
+    "theta0": 0.0,
+    "phiM": 90.0,
+    "phiK": 0.14,
+    "Dophi": 0.0,
+    "phi0": 0.0
+  },
+  "num_frames": 150,
+  "created": "2025-11-23T11:54:22"
+}
