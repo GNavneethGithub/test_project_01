@@ -92,25 +92,22 @@ def create_export_job():
     print("Created export ID:", export_id, "\n")
     return export_id
 
-
 def poll_until_ready(export_id):
-    query = """
-    query GetExport($id: ID!) {
-      export(id: $id) {
-        id
-        status
-        result {
-          urls
-          prefix
-        }
-      }
-    }
-    """
+    # Build a query that inlines the export_id directly (no GraphQL variables)
+    # This avoids the "Unknown type 'ID'" error some endpoints return.
+    query_template = (
+        'query GetExport { '
+        'export(id: "%s") { '
+        'id status result { urls prefix } '
+        '} '
+        '}'
+    )
+    query = query_template % export_id
 
     start = time.time()
 
     while True:
-        resp = run_curl({"query": query, "variables": {"id": export_id}})
+        resp = run_curl({"query": query})
         exp = resp.get("data", {}).get("export")
 
         if not exp:
