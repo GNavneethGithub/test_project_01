@@ -128,25 +128,65 @@ def poll_until_ready(export_id):
 
         time.sleep(POLL_INTERVAL)
 
-
 def extract_links(result):
-    urls = result.get("urls")
-    prefix = result.get("prefix")
-
+    """
+    Return a list of records for NDJSON:
+      [{"url": "..."}, {"url": "..."}]  OR  [{"prefix":"s3://..."}]
+    Handles multiple shapes:
+      - result is a dict: { "urls": [...], "prefix": "..." }
+      - result is a list of dicts: [ { "urls": [...] }, { "prefix": "..." } ]
+      - result is a list of strings: [ "https://...file1", "https://...file2" ]
+    """
     records = []
 
-    if urls:
-        for u in urls:
-            records.append({"url": u})
+    # Case A: result is a dict
+    if isinstance(result, dict):
+        urls = result.get("urls")
+        prefix = result.get("prefix")
+        if isinstance(urls, list) and urls:
+            for u in urls:
+                if isinstance(u, str) and u.strip():
+                    records.append({"url": u})
+        elif prefix:
+            records.append({"prefix": prefix})
+        return records
 
-    elif prefix:
-        records.append({"prefix": prefix})
+    # Case B: result is a list
+    if isinstance(result, list):
+        # If it's a list of strings (direct URLs)
+        if all(isinstance(item, str) for item in result):
+            for u in result:
+                if u and u.strip():
+                    records.append({"url": u})
+            return records
 
-    else:
-        raise RuntimeError("No urls or prefix found in result")
+        # If it's a list of dicts, try to pull urls/prefix from each dict
+        for item in result:
+            if not isinstance(item, dict):
+                continue
+            # collect urls if present
+            urls = item.get("urls") if isinstance(item.get("urls", None), list) else None
+            if urls:
+                for u in urls:
+                    if isinstance(u, str) and u.strip():
+                        records.append({"url": u})
+                continue
+            # collect prefix if present
+            prefix = item.get("prefix")
+            if prefix:
+                records.append({"prefix": prefix})
+                continue
+            # fallback: scan dict values for strings that look like s3/http links
+            for v in item.values():
+                if isinstance(v, str) and (v.startswith("http://") or v.startswith("https://") or v.startswith("s3://")):
+                    # avoid duplicates
+                    rec = {"url": v} if v.startswith("http") else {"prefix": v}
+                    if rec not in records:
+                        records.append(rec)
+        return records
 
-    return records
-
+    # If we get here, we don't know the shape
+    raise RuntimeError(f"Unexpected result shape: {type(result)} - please inspect the debug output")
 
 def write_ndjson(records):
     with open(OUTPUT_FILE, "w") as f:
