@@ -454,7 +454,7 @@ if __name__ == '__main__':
             'motion': dict(
                 f=1.0,
                 psiM=60 * np.pi / 180.0, psiC=1.09, Dopsi=-90 * np.pi / 180.0, psi0=90 * np.pi / 180.0,
-                thetaM=0.0, Dotheta=0.0, thetaN=1.0, theta0=0.0,
+                thetaM=20.0 * np.pi / 180.0, Dotheta=0.0 * np.pi / 180.0, thetaN=1.0, theta0=0.0 * np.pi / 180.0,
                 phiM=30 * np.pi / 180.0, phiK=0.14, Dophi=0.0* np.pi / 180.0, phi0=45 * np.pi / 180.0
             ),
             'side': 'right', 'color': 'blue', 'transparency': 0.8, 'visible': True
@@ -466,7 +466,7 @@ if __name__ == '__main__':
             'motion': dict(
                 f=1.0,
                 psiM=60 * np.pi / 180.0, psiC=1.09, Dopsi=-90 * np.pi / 180.0, psi0=90 * np.pi / 180.0,
-                thetaM=0.0, Dotheta=0.0, thetaN=1.0, theta0=0.0,
+                thetaM=20.0 * np.pi / 180.0, Dotheta=0.0 * np.pi / 180.0, thetaN=1.0, theta0=0.0 * np.pi / 180.0,
                 phiM=30 * np.pi / 180.0, phiK=0.14, Dophi=180 * np.pi / 180.0, phi0=-45 * np.pi / 180.0
             ),
             'side': 'left', 'color': 'blue', 'transparency': 0.8, 'visible': True
@@ -477,7 +477,7 @@ if __name__ == '__main__':
             'motion': dict(
                 f=1.0,
                 psiM=60 * np.pi / 180.0, psiC=1.09, Dopsi=-90 * np.pi / 180.0, psi0=90 * np.pi / 180.0,
-                thetaM=0.0, Dotheta=0.0, thetaN=1.0, theta0=0.0,
+                thetaM=20.0 * np.pi / 180.0, Dotheta=0.0 * np.pi / 180.0, thetaN=1.0, theta0=0.0 * np.pi / 180.0,
                 phiM=30 * np.pi / 180.0, phiK=0.14, Dophi=0 * np.pi / 180.0, phi0=-135 * np.pi / 180.0
             ),
             'side': 'right', 'color': 'blue', 'transparency': 0.8, 'visible': True
@@ -488,7 +488,7 @@ if __name__ == '__main__':
             'motion': dict(
                 f=1.0,
                 psiM=60 * np.pi / 180.0, psiC=1.09, Dopsi=-90 * np.pi / 180.0, psi0=90 * np.pi / 180.0,
-                thetaM=0.0, Dotheta=0.0, thetaN=1.0, theta0=0.0,
+                thetaM=20.0 * np.pi / 180.0, Dotheta=0.0 * np.pi / 180.0, thetaN=1.0, theta0=0.0 * np.pi / 180.0,
                 phiM=30 * np.pi / 180.0, phiK=0.14, Dophi=-180 * np.pi / 180.0, phi0=135 * np.pi / 180.0
             ),
             'side': 'left', 'color': 'blue', 'transparency': 0.8, 'visible': True
