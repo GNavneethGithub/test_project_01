@@ -344,20 +344,32 @@ if __name__ == '__main__':
         # phiM=30 * np.pi / 180.0,phiK=0.14,Dophi=0 * np.pi / 180.0, phi0=45 * np.pi / 180.0   
 
     wings_spec = [
+        # 1st quadrant motion for fourth wing     
+        {
+            'motion': dict(
+                f=1.0,
+                psiM=60 * np.pi / 180.0, psiC=1.09, Dopsi=-90 * np.pi / 180.0, psi0=90 * np.pi / 180.0,
+                thetaM=0.0, Dotheta=0.0, thetaN=1.0, theta0=0.0,
+                phiM=30 * np.pi / 180.0, phiK=0.14, Dophi=0.0* np.pi / 180.0, phi0=45 * np.pi / 180.0
+            ),
+            'side': 'right', 'color': 'black', 'transparency': 0.8, 'visible': True
+        },
+
+
+        # 2nd quadrant motion for fourth wing
         # {
         #     'motion': dict(
         #         f=1.0,
         #         psiM=60 * np.pi / 180.0, psiC=1.09, Dopsi=-90 * np.pi / 180.0, psi0=90 * np.pi / 180.0,
         #         thetaM=0.0, Dotheta=0.0, thetaN=1.0, theta0=0.0,
-        #         phiM=30 * np.pi / 180.0, phiK=0.14, Dophi=0.0* np.pi / 180.0, phi0=45 * np.pi / 180.0
+        #         phiM=30 * np.pi / 180.0, phiK=0.14, Dophi=-180 * np.pi / 180.0, phi0=135 * np.pi / 180.0
         #     ),
-        #     'side': 'right', 'color': 'red', 'transparency': 0.8, 'visible': True
-        # },
+        #     'side': 'left', 'color': 'black', 'transparency': 0.8, 'visible': True
+        # },  
 
 
-        # Dophi=180 * np.pi / 180.0, # 2nd quadrant motion for fourth wing
-        # phi0=-45 * np.pi / 180.0 # 2nd quadrant motion for fourth wing
 
+        # 3rd quadrant motion for thrid wing      
         {
             'motion': dict(
                 f=1.1,
@@ -369,8 +381,8 @@ if __name__ == '__main__':
         },
 
 
-        # Dophi=0 * np.pi / 180.0,   # 3rd quadrant motion for thrid wing
-        # phi0= -135 * np.pi / 180.0 # 3rd quadrant motion for thrid wing        
+
+        # 4th  quadrant motion for second wing
         {
             'motion': dict(
                 f=1.1,
@@ -381,19 +393,7 @@ if __name__ == '__main__':
             'side': 'right', 'color': 'green', 'transparency': 0.8, 'visible': True
         },
 
-
-
-        # # Dophi=-180 * np.pi / 180.0, # 4th  quadrant motion for second wing
-        # # phi0=135 * np.pi / 180.0  # 4th  quadrant motion for second wing
-        # {
-        #     'motion': dict(
-        #         f=1.0,
-        #         psiM=60 * np.pi / 180.0, psiC=1.09, Dopsi=-90 * np.pi / 180.0, psi0=90 * np.pi / 180.0,
-        #         thetaM=0.0, Dotheta=0.0, thetaN=1.0, theta0=0.0,
-        #         phiM=30 * np.pi / 180.0, phiK=0.14, Dophi=-180 * np.pi / 180.0, phi0=135 * np.pi / 180.0
-        #     ),
-        #     'side': 'left', 'color': 'blue', 'transparency': 0.8, 'visible': True
-        # },        
+      
     ]
 
     # build Wing objects from wings_spec
