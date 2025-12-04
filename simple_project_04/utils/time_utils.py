@@ -947,3 +947,108 @@ def _parse_duration_to_seconds(duration_str: str, log) -> int:
 
 
 
+def convert_timedelta_to_duration_string(
+    delta_t: timedelta,
+    logger: CustomChainLogger,
+) -> Dict[str, Any]:
+    """
+    Convert a timedelta object into a compact duration string.
+    Reverse of parse_duration_string().
+
+    Example:
+        timedelta(days=1, hours=2, minutes=30, seconds=15, milliseconds=500)
+        -> "1d2h30m15s500ms"
+
+    Returns:
+        {
+            "continue_dag_run": bool,
+            "error_message": Optional[str],
+            "duration_string": Optional[str],
+        }
+    """
+    log_keyword = "CONVERT_TIMEDELTA_TO_DURATION_STRING"
+    log = logger.new_frame(log_keyword)
+
+    result = {
+        "continue_dag_run": True,
+        "error_message": None,
+        "duration_string": None,
+    }
+
+    try:
+        if delta_t is None:
+            error_message = (
+                f"[{log_keyword}] Input timedelta object cannot be None."
+            )
+            result["continue_dag_run"] = False
+            result["error_message"] = error_message
+            log.error(log_keyword, error_message)
+            return result
+
+        total_ms = int(delta_t.total_seconds() * 1000)
+
+        # Extract components
+        days = total_ms // (24 * 60 * 60 * 1000)
+        total_ms %= (24 * 60 * 60 * 1000)
+
+        hours = total_ms // (60 * 60 * 1000)
+        total_ms %= (60 * 60 * 1000)
+
+        minutes = total_ms // (60 * 1000)
+        total_ms %= (60 * 1000)
+
+        seconds = total_ms // 1000
+        total_ms %= 1000
+
+        milliseconds = total_ms
+
+        # Build duration string
+        parts = []
+        if days > 0:
+            parts.append(f"{days}d")
+        if hours > 0:
+            parts.append(f"{hours}h")
+        if minutes > 0:
+            parts.append(f"{minutes}m")
+        if seconds > 0:
+            parts.append(f"{seconds}s")
+        if milliseconds > 0:
+            parts.append(f"{milliseconds}ms")
+
+        # If timedelta was exactly zero
+        if not parts:
+            parts.append("0s")
+
+        duration_string = "".join(parts)
+        result["duration_string"] = duration_string
+
+        log.info(
+            log_keyword,
+            "Converted timedelta to duration string successfully",
+            duration_string=duration_string,
+        )
+
+        return result
+
+    except Exception as e:
+        error_message = (
+            f"[{log_keyword}] Unexpected error while converting timedelta to duration string: {e}"
+        )
+        result["continue_dag_run"] = False
+        result["error_message"] = error_message
+
+        log.error(
+            log_keyword,
+            "Unexpected exception",
+            exception=str(e),
+            error_message=error_message,
+        )
+
+        return result
+
+
+
+
+
+
+

@@ -1,6 +1,5 @@
 # my_main_project_folder/framework/monitoring_scripts/sf_pipeline_tracking_scripts.py
 
-
 import traceback
 import json
 from typing import Dict, Any, List, Optional
@@ -9,6 +8,11 @@ from utils.custom_logging import CustomChainLogger, setup_logger
 from utils.db_utils import safe_close_cursor_and_conn
 from utils.sql_formatter_utility import format_and_print_sql_query
 from framework.monitoring_scripts.snowflake_connector import get_snowflake_connection
+
+from framework.time_context_script import (
+    fill_gap_and_insert_pending_records_for_tracking_table
+
+)
 
 
 def create_pipeline_run_tracking_table_if_not_exists(
@@ -80,22 +84,19 @@ def create_pipeline_run_tracking_table_if_not_exists(
             return return_object
 
         cursor = conn.cursor()
-
-        # ---------------------------------------------------------------------
-        #  FINAL CREATE TABLE DDL (explicit defaults + no CREATED_BY)
+        # PIPELINE_NAME, CONFIG_NAME
         # ---------------------------------------------------------------------
         create_table_sql = f"""
         CREATE TABLE IF NOT EXISTS {three_part_name} (
             TRACKING_ID                     VARCHAR DEFAULT NULL,
             PIPELINE_NAME                   VARCHAR  DEFAULT 'unknown_pipeline_name',
             CONFIG_NAME                     VARCHAR  DEFAULT 'unknown_configuration_name',
-            CONFIG_VERSION                  INT  DEFAULT 1,
 
             QUERY_WINDOW_START_TIMESTAMP    TIMESTAMP_TZ DEFAULT NULL,
             QUERY_WINDOW_END_TIMESTAMP      TIMESTAMP_TZ DEFAULT NULL,
 
             QUERY_WINDOW_DAY                DATE    DEFAULT NULL,
-            QUERY_WINDOW_DURATION           VARCHAR DEFAULT 'XX-YY',
+            QUERY_WINDOW_DURATION           VARCHAR DEFAULT 'XX',
 
             PIPELINE_EXECUTION_DETAILS      VARIANT DEFAULT NULL,
 
@@ -308,7 +309,6 @@ def fetch_pending_records(
       - MAX_PENDING_RECORDS : int (limit)
       - PIPELINE_NAME        : Optional[str]
       - CONFIG_NAME          : Optional[str]
-      - CONFIG_VERSION       : Optional[float|str]
       - sf_config_params     : dict
       - pipeline_run_tracking_details : dict with database_name, schema_name, table_name
 
@@ -366,7 +366,6 @@ def fetch_pending_records(
         # Read optional uppercase filters only (no lowercase fallbacks)
         PIPELINE_NAME = config.get("PIPELINE_NAME")
         CONFIG_NAME = config.get("CONFIG_NAME")
-        CONFIG_VERSION = config.get("CONFIG_VERSION")
 
         # Debug: show resolved inputs (safe; do not include secrets)
         log.debug(
@@ -376,7 +375,6 @@ def fetch_pending_records(
                 "MAX_PENDING_RECORDS": MAX_PENDING_RECORDS,
                 "PIPELINE_NAME": PIPELINE_NAME,
                 "CONFIG_NAME": CONFIG_NAME,
-                "CONFIG_VERSION": CONFIG_VERSION,
                 "query_tag": query_tag
             }
         )
@@ -423,9 +421,6 @@ def fetch_pending_records(
         if CONFIG_NAME is not None:
             where_clauses.append("CONFIG_NAME = %(CONFIG_NAME)s")
             params["CONFIG_NAME"] = CONFIG_NAME
-        if CONFIG_VERSION is not None:
-            where_clauses.append("CONFIG_VERSION = %(CONFIG_VERSION)s")
-            params["CONFIG_VERSION"] = CONFIG_VERSION
 
         where_sql = " AND ".join(where_clauses)
 
@@ -515,7 +510,6 @@ def fetch_running_records(
     Fetch all records with PIPELINE_STATUS = 'RUNNING', applying optional filters:
       - PIPELINE_NAME (uppercase key)
       - CONFIG_NAME   (uppercase key)
-      - CONFIG_VERSION(uppercase key)
 
     Returns (always, never raises):
       {
@@ -546,7 +540,7 @@ def fetch_running_records(
         # Read uppercase-only filters
         PIPELINE_NAME = config.get("PIPELINE_NAME")
         CONFIG_NAME = config.get("CONFIG_NAME")
-        CONFIG_VERSION = config.get("CONFIG_VERSION")
+
 
         # Debug: resolved filters
         log.debug(
@@ -555,7 +549,6 @@ def fetch_running_records(
             inputs={
                 "PIPELINE_NAME": PIPELINE_NAME,
                 "CONFIG_NAME": CONFIG_NAME,
-                "CONFIG_VERSION": CONFIG_VERSION,
                 "query_tag": query_tag
             }
         )
@@ -597,9 +590,6 @@ def fetch_running_records(
         if CONFIG_NAME is not None:
             where_clauses.append("CONFIG_NAME = %(CONFIG_NAME)s")
             params["CONFIG_NAME"] = CONFIG_NAME
-        if CONFIG_VERSION is not None:
-            where_clauses.append("CONFIG_VERSION = %(CONFIG_VERSION)s")
-            params["CONFIG_VERSION"] = CONFIG_VERSION
 
         where_sql = " AND ".join(where_clauses)
 
@@ -676,16 +666,16 @@ def fetch_running_records(
     finally:
         safe_close_cursor_and_conn(cursor, conn, log, log_keyword)
 
-def update_tracking_record_partial(
+def update_tracking_record(
     config: Dict[str, Any],
     logger: CustomChainLogger,
     record: Dict[str, Any],
     query_tag: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Partially update a single tracking row identified by TRACKING_ID.
+    Update a single tracking row identified by TRACKING_ID.
     """
-    log_keyword =  "UPDATE_TRACKING_RECORD_PARTIAL"      
+    log_keyword =  "UPDATE_TRACKING_RECORD"      
     log = logger.new_frame(log_keyword)
  
     result: Dict[str, Any] = {
@@ -703,7 +693,6 @@ def update_tracking_record_partial(
         "TRACKING_ID",
         "PIPELINE_NAME",
         "CONFIG_NAME",
-        "CONFIG_VERSION",
         "QUERY_WINDOW_START_TIMESTAMP",
         "QUERY_WINDOW_END_TIMESTAMP",
         "QUERY_WINDOW_DAY",
@@ -843,8 +832,8 @@ def update_tracking_record_partial(
         except Exception:
             pass
 
-        err_msg = f"Unexpected failure in update_tracking_record_partial: {str(e)}"
-        log.error(log_keyword, "Unhandled exception in update_tracking_record_partial.",
+        err_msg = f"Unexpected failure in update_tracking_record: {str(e)}"
+        log.error(log_keyword, "Unhandled exception in update_tracking_record.",
                   error_message=err_msg, query_id=qid_fallback)
         result["error_message"] = f"{err_msg}\n{tb}"
         result["continue_dag_run"] = False
@@ -853,7 +842,6 @@ def update_tracking_record_partial(
 
     finally:
         safe_close_cursor_and_conn(cursor, conn, log, log_keyword)
-
 
 def check_table_exists_from_config(
     config: Dict[str, Any],
@@ -900,7 +888,7 @@ def check_table_exists_from_config(
             return return_object
 
         conn = conn_result["conn"]
-        cursor = conn_result["cursor"]  # <-- IMPORTANT: reuse the one your function created
+        cursor = conn_result["cursor"] 
 
         if cursor is None:
             msg = "Connection returned no cursor."
@@ -997,10 +985,768 @@ def check_table_exists_from_config(
         return return_object
 
 
+def fetch_last_completed_window_end(
+    config: Dict[str, Any],
+    logger: CustomChainLogger,
+    query_tag: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Fetch the MAX(QUERY_WINDOW_END_TIMESTAMP) for a given pipeline_name and config_name
+    from the tracking table, restricted to PIPELINE_STATUS = 'COMPLETED'.
+
+    Inputs expected in config (lowercase keys, as per new orchestration layer):
+      - pipeline_name : str
+      - config_name   : str
+      - sf_config_params : dict
+      - pipeline_run_tracking_details : dict with:
+            - database_name
+            - schema_name
+            - table_name
+
+    Returns:
+      {
+        "continue_dag_run": bool,
+        "error_message": Optional[str],
+        "last_completed_end": Optional[datetime],  # None if no completed rows
+      }
+    """
+    log_keyword = "FETCH_LAST_COMPLETED_WINDOW_END"
+    log = logger.new_frame(log_keyword)
+
+    result: Dict[str, Any] = {
+        "continue_dag_run": False,
+        "error_message": None,
+        "last_completed_end": None,
+    }
+
+    conn = None
+    cursor = None
+
+    try:
+        # ------------------------------------------------------------------
+        # Read identifiers from config (lowercase keys as per new design)
+        # ------------------------------------------------------------------
+        pipeline_name = config["pipeline_name"]
+        config_name = config["config_name"]
+
+        log.info(
+            log_keyword,
+            "Starting fetch_last_completed_window_end.",
+            pipeline_name=pipeline_name,
+            config_name=config_name,
+            query_tag=query_tag,
+        )
+
+        # Resolve Snowflake connection params and tracking table details
+        sf_con_parms = config.get("sf_config_params", {}) or {}
+        table_config = config.get("pipeline_run_tracking_details", {}) or {}
+
+        database = table_config.get("database_name") or sf_con_parms.get("database") or "UNKNOWN_DB"
+        schema = table_config.get("schema_name") or sf_con_parms.get("schema") or "PUBLIC"
+        table = table_config.get("table_name") or "PIPELINE_RUN_TRACKING"
+
+        three_part_name = f"{database}.{schema}.{table}"
+
+        log.info(
+            log_keyword,
+            "Resolved Snowflake tracking table for last_completed_end fetch.",
+            target_table=three_part_name,
+        )
+
+        # ------------------------------------------------------------------
+        # Obtain Snowflake connection
+        # ------------------------------------------------------------------
+        conn_result = get_snowflake_connection(sf_con_parms, log, QUERY_TAG=query_tag)
+        if not conn_result.get("continue_dag_run"):
+            msg = conn_result.get("error_message") or "Failed to obtain Snowflake connection"
+            log.error(
+                log_keyword,
+                "Failed to get Snowflake connection.",
+                error_message=msg,
+            )
+            result["error_message"] = msg
+            return result
+
+        conn = conn_result.get("conn")
+        if conn is None:
+            msg = "Snowflake connector returned no connection object"
+            log.error(log_keyword, msg)
+            result["error_message"] = msg
+            return result
+
+        cursor = conn.cursor(DictCursor)
+
+        # ------------------------------------------------------------------
+        # Build SQL for MAX(QUERY_WINDOW_END_TIMESTAMP)
+        # ------------------------------------------------------------------
+        select_sql = f"""
+        SELECT
+            MAX(QUERY_WINDOW_END_TIMESTAMP) AS LAST_COMPLETED_END
+        FROM {three_part_name}
+        WHERE PIPELINE_STATUS = 'COMPLETED'
+          AND PIPELINE_NAME = %(PIPELINE_NAME)s
+          AND CONFIG_NAME = %(CONFIG_NAME)s
+        """
+
+        params: Dict[str, Any] = {
+            "PIPELINE_NAME": pipeline_name,
+            "CONFIG_NAME": config_name,
+        }
+
+        # Optional pretty-print of SQL
+        try:
+            format_and_print_sql_query(select_sql, params)
+            log.debug(
+                log_keyword,
+                "Final SQL prepared for last_completed_end fetch",
+                sql=select_sql,
+                params=params,
+            )
+        except Exception:
+            log.debug(
+                log_keyword,
+                "format_and_print_sql_query failed; proceeding with raw SQL for last_completed_end fetch",
+                sql=select_sql,
+                params=params,
+            )
+
+        # ------------------------------------------------------------------
+        # Execute query
+        # ------------------------------------------------------------------
+        try:
+            cursor.execute(select_sql, params)
+            # We do not expose query_id here, but we may still log it
+            qid = getattr(cursor, "sfqid", None)
+        except Exception as exec_err:
+            import traceback
+            tb = traceback.format_exc()
+            qid = getattr(cursor, "sfqid", None) if cursor is not None else None
+            msg = f"SQL execution failed while fetching last completed window end: {str(exec_err)}"
+            log.error(
+                log_keyword,
+                "Failed to execute MAX SELECT on tracking table.",
+                error_message=msg,
+                query_id=qid,
+            )
+            result["error_message"] = f"{msg}\n{tb}"
+            return result
+
+        # ------------------------------------------------------------------
+        # Fetch result row
+        # ------------------------------------------------------------------
+        try:
+            row = cursor.fetchone()
+        except Exception as fetch_err:
+            import traceback
+            tb = traceback.format_exc()
+            qid = getattr(cursor, "sfqid", None) if cursor is not None else None
+            msg = f"Failed to fetch row for last completed window end: {str(fetch_err)}"
+            log.error(
+                log_keyword,
+                "Failed to fetch row after MAX SELECT execution.",
+                error_message=msg,
+                query_id=qid,
+            )
+            result["error_message"] = f"{msg}\n{tb}"
+            return result
+
+        last_completed_end = None
+        if row:
+            # DictCursor returns columns by alias
+            last_completed_end = row.get("LAST_COMPLETED_END")
+
+        result["last_completed_end"] = last_completed_end
+        result["continue_dag_run"] = True
+
+        log.info(
+            log_keyword,
+            "Fetched last completed window end.",
+            pipeline_name=pipeline_name,
+            config_name=config_name,
+            last_completed_end=str(last_completed_end) if last_completed_end is not None else None,
+        )
+
+        return result
+
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        err_msg = f"Unexpected failure in fetch_last_completed_window_end: {str(e)}"
+        log.error(
+            log_keyword,
+            "Unhandled exception in fetch_last_completed_window_end.",
+            error_message=err_msg,
+        )
+        result["error_message"] = f"{err_msg}\n{tb}"
+        result["continue_dag_run"] = False
+        return result
+
+    finally:
+        safe_close_cursor_and_conn(cursor, conn, log, log_keyword)
+
+
+def insert_multiple_records_into_tracking_table(
+    records: List[Dict[str, Any]],
+    config: Dict[str, Any],
+    logger: CustomChainLogger,
+    query_tag: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Bulk insert multiple tracking-table-style records into the tracking table.
+
+    This function:
+      - Inserts full records into the Snowflake tracking table.
+      - Handles VARIANT columns via PARSE_JSON().
+      - Uses executemany for bulk insertion.
+      - Does NOT raise exceptions; returns {continue_dag_run, error_message}.
+
+    Inputs:
+        records: list of dicts shaped like tracking table rows
+        config: dict containing:
+            - config["sf_config_params"]
+            - config["pipeline_run_tracking_details"]
+        logger: CustomChainLogger
+        query_tag: optional query tag
+
+    Returns:
+      {
+          "continue_dag_run": bool,
+          "error_message": Optional[str],
+          "inserted_row_count": int,
+          "query_id": Optional[str],
+      }
+    """
+
+    log_keyword = "INSERT_MULTIPLE_RECORDS_INTO_TRACKING_TABLE"
+    log = logger.new_frame(log_keyword)
+
+    result: Dict[str, Any] = {
+        "continue_dag_run": True,
+        "error_message": None,
+        "inserted_row_count": 0,
+        "query_id": None,
+    }
+
+    conn = None
+    cursor = None
+
+    try:
+        if not records:
+            log.info(
+                log_keyword,
+                "No records provided for bulk insert. Nothing to do.",
+            )
+            return result
+
+        log.info(
+            log_keyword,
+            "Starting bulk insert into tracking table.",
+            TOTAL_RECORDS=len(records),
+        )
+
+        # -----------------------------------------------------------
+        # Resolve table and Snowflake config
+        # -----------------------------------------------------------
+        sf_con_parms: Dict[str, Any] = config["sf_config_params"]
+        tracking_details: Dict[str, Any] = config["pipeline_run_tracking_details"]
+
+        database_name: str = tracking_details["database_name"]
+        schema_name: str = tracking_details["schema_name"]
+        table_name: str = tracking_details["table_name"]
+
+        fully_qualified_table_name = f"{database_name}.{schema_name}.{table_name}"
+
+        log.info(
+            log_keyword,
+            "Resolved tracking table.",
+            TRACKING_TABLE=fully_qualified_table_name,
+        )
+
+        # -----------------------------------------------------------
+        # Establish Snowflake connection
+        # -----------------------------------------------------------
+        conn_result = get_snowflake_connection(sf_con_parms, log, QUERY_TAG=query_tag)
+        if not conn_result.get("continue_dag_run", False):
+            error_message = (
+                f"[{log_keyword}] Failed to obtain Snowflake connection. "
+                f"Underlying error: {conn_result.get('error_message')}"
+            )
+            result["continue_dag_run"] = False
+            result["error_message"] = error_message
+
+            log.error(log_keyword, error_message)
+            return result
+
+        conn = conn_result.get("conn")
+        if conn is None:
+            error_message = f"[{log_keyword}] Snowflake connection object is None."
+            result["continue_dag_run"] = False
+            result["error_message"] = error_message
+
+            log.error(log_keyword, error_message)
+            return result
+
+        cursor = conn.cursor(DictCursor)
+
+        # -----------------------------------------------------------
+        # Prepare INSERT statement
+        # -----------------------------------------------------------
+        columns = [
+            "TRACKING_ID",
+            "PIPELINE_NAME",
+            "CONFIG_NAME",
+            "QUERY_WINDOW_START_TIMESTAMP",
+            "QUERY_WINDOW_END_TIMESTAMP",
+            "QUERY_WINDOW_DAY",
+            "QUERY_WINDOW_DURATION",
+            "PIPELINE_EXECUTION_DETAILS",   # VARIANT
+            "SOURCE_COUNT",
+            "STAGES_COUNT",                 # VARIANT
+            "TARGET_COUNT",
+            "PIPELINE_STATUS",
+            "CREATED_AT",
+            "UPDATED_AT",
+        ]
+
+        column_list_sql = ", ".join(columns)
+
+        # Values expression (PARSE_JSON for VARIANT)
+        value_exprs = []
+        for col in columns:
+            if col in ("PIPELINE_EXECUTION_DETAILS", "STAGES_COUNT"):
+                value_exprs.append(f"PARSE_JSON(%({col})s)")
+            else:
+                value_exprs.append(f"%({col})s")
+
+        values_list_sql = ", ".join(value_exprs)
+
+        insert_sql = f"""
+        INSERT INTO {fully_qualified_table_name} (
+            {column_list_sql}
+        )
+        SELECT
+            {values_list_sql}
+        """
+
+        # -----------------------------------------------------------
+        # Build params list (JSON-dump VARIANT columns)
+        # -----------------------------------------------------------
+        params_list: List[Dict[str, Any]] = []
+
+        for rec_index, rec in enumerate(records):
+            params: Dict[str, Any] = {}
+
+            for col in columns:
+                value = rec.get(col)
+
+                if col in ("PIPELINE_EXECUTION_DETAILS", "STAGES_COUNT"):
+                    if value is None:
+                        params[col] = None
+                    else:
+                        params[col] = json.dumps(value)
+                else:
+                    params[col] = value
+
+            params_list.append(params)
+
+            log.debug(
+                log_keyword,
+                "Prepared parameters for a record.",
+                RECORD_INDEX=rec_index,
+            )
+
+        # Try formatted preview
+        try:
+            format_and_print_sql_query(insert_sql, params_list[0])
+        except Exception:
+            log.debug(
+                log_keyword,
+                "SQL preview failed; continuing.",
+            )
+
+        # -----------------------------------------------------------
+        # Bulk insert
+        # -----------------------------------------------------------
+        try:
+            cursor.executemany(insert_sql, params_list)
+
+            query_id = getattr(cursor, "sfqid", None)
+            inserted_row_count = cursor.rowcount if cursor.rowcount is not None else len(records)
+
+            result["query_id"] = query_id
+            result["inserted_row_count"] = inserted_row_count
+
+            log.info(
+                log_keyword,
+                "Bulk insert completed.",
+                INSERTED_ROW_COUNT=inserted_row_count,
+                QUERY_ID=query_id,
+            )
+
+            return result
+
+        except Exception as exec_err:
+            import traceback
+            tb = traceback.format_exc()
+
+            query_id = getattr(cursor, "sfqid", None)
+            error_message = (
+                f"[{log_keyword}] Failed to execute bulk insert on '{fully_qualified_table_name}'. "
+                f"Error: {exec_err}"
+            )
+
+            result["continue_dag_run"] = False
+            result["error_message"] = f"{error_message}\n{tb}"
+            result["query_id"] = query_id
+
+            log.error(
+                log_keyword,
+                "Exception during bulk insert.",
+                error_message=error_message,
+                QUERY_ID=query_id,
+            )
+
+            return result
+
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+
+        error_message = (
+            f"[{log_keyword}] Unexpected error in insert_multiple_records_into_tracking_table: {e}"
+        )
+        result["continue_dag_run"] = False
+        result["error_message"] = f"{error_message}\n{tb}"
+
+        log.error(
+            log_keyword,
+            "Unexpected exception in insert_multiple_records_into_tracking_table.",
+            error_message=error_message,
+        )
+        return result
+
+    finally:
+        safe_close_cursor_and_conn(cursor, conn, log, log_keyword)
+
+def fetch_last_recorded_window_end(
+    config: Dict[str, Any],
+    logger: CustomChainLogger,
+    query_tag: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Fetch MAX(QUERY_WINDOW_END_TIMESTAMP) for a given PIPELINE_NAME + CONFIG_NAME
+    from the tracking table, across ALL PIPELINE_STATUS values.
+
+    Returns:
+      {
+        "continue_dag_run": bool,
+        "error_message": Optional[str],
+        "last_recorded_end": Optional[datetime],  # None if no rows
+      }
+    """
+    log_keyword = "FETCH_LAST_RECORDED_WINDOW_END"
+    log = logger.new_frame(log_keyword)
+
+    result: Dict[str, Any] = {
+        "continue_dag_run": False,
+        "error_message": None,
+        "last_recorded_end": None,
+    }
+
+    conn = None
+    cursor = None
+
+    try:
+        pipeline_name = config["pipeline_name"]
+        config_name = config["config_name"]
+
+        sf_con_parms: Dict[str, Any] = config["sf_config_params"]
+        table_config: Dict[str, Any] = config["pipeline_run_tracking_details"]
+
+        database = table_config["database_name"]
+        schema = table_config["schema_name"]
+        table = table_config["table_name"]
+
+        three_part_name = f"{database}.{schema}.{table}"
+
+        log.info(
+            log_keyword,
+            "Fetching last recorded window end (all statuses).",
+            PIPELINE_NAME=pipeline_name,
+            CONFIG_NAME=config_name,
+            TRACKING_TABLE=three_part_name,
+            QUERY_TAG=query_tag,
+        )
+
+        conn_result = get_snowflake_connection(sf_con_parms, log, QUERY_TAG=query_tag)
+        if not conn_result.get("continue_dag_run", False):
+            error_message = (
+                f"[{log_keyword}] Failed to obtain Snowflake connection. "
+                f"Underlying error: {conn_result.get('error_message')}"
+            )
+            result["error_message"] = error_message
+            log.error(log_keyword, error_message)
+            return result
+
+        conn = conn_result.get("conn")
+        if conn is None:
+            error_message = f"[{log_keyword}] Connection object is None."
+            result["error_message"] = error_message
+            log.error(log_keyword, error_message)
+            return result
+
+        cursor = conn.cursor(DictCursor)
+
+        select_sql = f"""
+        SELECT
+            MAX(QUERY_WINDOW_END_TIMESTAMP) AS LAST_RECORDED_END
+        FROM {three_part_name}
+        WHERE PIPELINE_NAME = %(PIPELINE_NAME)s
+          AND CONFIG_NAME = %(CONFIG_NAME)s
+        """
+
+        params = {
+            "PIPELINE_NAME": pipeline_name,
+            "CONFIG_NAME": config_name,
+        }
+
+        try:
+            format_and_print_sql_query(select_sql, params)
+        except Exception:
+            log.debug(
+                log_keyword,
+                "format_and_print_sql_query failed; continuing with raw SQL.",
+            )
+
+        try:
+            cursor.execute(select_sql, params)
+            qid = getattr(cursor, "sfqid", None)
+        except Exception as exec_err:
+            import traceback
+            tb = traceback.format_exc()
+            qid = getattr(cursor, "sfqid", None) if cursor is not None else None
+            error_message = (
+                f"[{log_keyword}] SQL execution failed while fetching last recorded window end: {exec_err}"
+            )
+            result["error_message"] = f"{error_message}\n{tb}"
+            log.error(
+                log_keyword,
+                "SQL execution error.",
+                error_message=error_message,
+                QUERY_ID=qid,
+            )
+            return result
+
+        try:
+            row = cursor.fetchone()
+        except Exception as fetch_err:
+            import traceback
+            tb = traceback.format_exc()
+            qid = getattr(cursor, "sfqid", None) if cursor is not None else None
+            error_message = (
+                f"[{log_keyword}] Failed to fetch row for last recorded window end: {fetch_err}"
+            )
+            result["error_message"] = f"{error_message}\n{tb}"
+            log.error(
+                log_keyword,
+                "Row fetch error.",
+                error_message=error_message,
+                QUERY_ID=qid,
+            )
+            return result
+
+        last_recorded_end = None
+        if row:
+            last_recorded_end = row.get("LAST_RECORDED_END")
+
+        result["last_recorded_end"] = last_recorded_end
+        result["continue_dag_run"] = True
+
+        log.info(
+            log_keyword,
+            "Fetched last recorded window end.",
+            LAST_RECORDED_END=str(last_recorded_end) if last_recorded_end else None,
+        )
+
+        return result
+
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        error_message = f"[{log_keyword}] Unexpected failure in fetch_last_recorded_window_end: {e}"
+        result["error_message"] = f"{error_message}\n{tb}"
+        log.error(
+            log_keyword,
+            "Unhandled exception.",
+            error_message=error_message,
+        )
+        return result
+
+    finally:
+        safe_close_cursor_and_conn(cursor, conn, log, log_keyword)
+
+
+def get_next_n_records_for_data_pipeline(
+    config: Dict[str, Any],
+    logger: CustomChainLogger,
+    query_tag: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    High-level orchestrator used by the downstream team.
+
+    Steps:
+      1) Fill any time gap in the tracking table by creating new PENDING records
+         (WITHOUT duplicating existing rows) using:
+             fill_gap_and_insert_pending_records_for_tracking_table().
+      2) Fetch up to N PENDING records for this pipeline/config using:
+             fetch_pending_records().
+         Here N is driven by config["MAX_PENDING_RECORDS"] (or whatever
+         fetch_pending_records expects).
+
+    This function does NOT raise exceptions. All errors are folded into the
+    return structure.
+
+    Return structure (fixed as requested):
+      {
+          "continue_dag_run": bool,
+          "error_message": Optional[str],
+
+          # what downstream actually needs:
+          "records": List[Dict[str, Any]],   # up to N PENDING records (existing + new)
+
+          # optional extras:
+          "pending_count_before": Optional[int],
+          "new_records_created": Optional[int],
+          "total_returned": int,
+      }
+    """
+    log_keyword = "GET_NEXT_N_RECORDS_FOR_DATA_PIPELINE"
+    log = logger.new_frame(log_keyword)
+
+    result: Dict[str, Any] = {
+        "continue_dag_run": True,
+        "error_message": None,
+        "records": [],
+        "pending_count_before": None,  
+        "new_records_created": None,
+        "total_returned": 0,
+    }
+
+    try:
+        log.info(
+            log_keyword,
+            "Starting orchestrator to get next N records for data pipeline.",
+            QUERY_TAG=query_tag,
+        )
+
+        # ------------------------------------------------------------------
+        # 1) Fill the gap FIRST (if any)
+        # ------------------------------------------------------------------
+        gap_fill_res = fill_gap_and_insert_pending_records_for_tracking_table(
+            config=config,
+            logger=log,
+            query_tag=query_tag,
+        )
+
+        if not gap_fill_res.get("continue_dag_run", False):
+            error_message = gap_fill_res.get(
+                "error_message",
+                "[GET_NEXT_N_RECORDS_FOR_DATA_PIPELINE] "
+                "fill_gap_and_insert_pending_records_for_tracking_table failed.",
+            )
+            result["continue_dag_run"] = False
+            result["error_message"] = error_message
+            # We still capture how many new records were *attempted* to be created
+            result["new_records_created"] = gap_fill_res.get("inserted_row_count", 0)
+
+            log.error(
+                log_keyword,
+                "Gap-fill orchestrator returned continue_dag_run=False.",
+                error_message=error_message,
+                new_records_created=result["new_records_created"],
+            )
+            return result
+
+        # If gap-fill succeeded, record how many new rows were inserted
+        new_records_created = gap_fill_res.get("inserted_row_count", 0)
+        result["new_records_created"] = int(new_records_created or 0)
+
+        log.info(
+            log_keyword,
+            "Gap-fill step completed successfully.",
+            new_records_created=result["new_records_created"],
+        )
+
+        # ------------------------------------------------------------------
+        # 2) Fetch up to N PENDING records from tracking table
+        # ------------------------------------------------------------------
+        pending_res = fetch_pending_records(
+            config=config,
+            logger=log,
+            query_tag=query_tag,
+        )
+
+        if not pending_res.get("continue_dag_run", False):
+            error_message = pending_res.get(
+                "error_message",
+                "[GET_NEXT_N_RECORDS_FOR_DATA_PIPELINE] fetch_pending_records failed.",
+            )
+            result["continue_dag_run"] = False
+            result["error_message"] = error_message
+            # No records returned in failure case
+            result["records"] = []
+            result["total_returned"] = 0
+
+            log.error(
+                log_keyword,
+                "fetch_pending_records returned continue_dag_run=False.",
+                error_message=error_message,
+            )
+            return result
+
+        records: List[Dict[str, Any]] = pending_res.get("records", []) or []
+        result["records"] = records
+        result["total_returned"] = len(records)
+
+        log.info(
+            log_keyword,
+            "Successfully fetched PENDING records for downstream pipeline.",
+            total_returned=result["total_returned"],
+            new_records_created=result["new_records_created"],
+        )
+
+        return result
+
+    except Exception as e:
+        tb = traceback.format_exc()
+        error_message = (
+            f"[{log_keyword}] Unexpected error in get_next_n_records_for_data_pipeline: {e}"
+        )
+
+        result["continue_dag_run"] = False
+        result["error_message"] = f"{error_message}\n{tb}"
+        result["records"] = []
+        result["total_returned"] = 0
+
+        log.error(
+            log_keyword,
+            "Unexpected exception in get_next_n_records_for_data_pipeline.",
+            error_message=error_message,
+        )
+
+        return result
 
 
 
+def get_next_n_records_for_data_pipeline_main(config: Dict[str, Any]):
+    # Setup the base logger
+    base_logger = setup_logger()
+    
+    # We are in main_func. Create the *first* log frame.
+    logger = CustomChainLogger(base_logger).new_frame("get_next_n_records_for_data_pipeline_main")
+    query_tag = config.get("index_group") + "_" + config.get("business_index_name")
+    result = get_next_n_records_for_data_pipeline( config, logger, query_tag  )
 
-
+    return result
 
 

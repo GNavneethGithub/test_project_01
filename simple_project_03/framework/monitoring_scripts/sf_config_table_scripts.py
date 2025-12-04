@@ -38,9 +38,9 @@ def create_pipeline_config_details_table_if_not_exists(
             - 'table_name' (str): Full qualified table name (DATABASE.SCHEMA.TABLE).
             - 'table_exists' (bool): True if table was created or already exists.
     """
-    
-    log = logger.new_frame("create_pipeline_config_details_table_if_not_exists")
-    
+    log_keyword = "PIPELINE_CONFIG_DETAILS_TABLE_CREATION"    
+    log = logger.new_frame(log_keyword)
+
     # Initialize variables that might not get assigned if early exception occurs
     query_id = None
     conn = None
@@ -61,7 +61,7 @@ def create_pipeline_config_details_table_if_not_exists(
     
     try:
         log.info(
-            "PIPELINE_CONFIG_DETAILS_TABLE_CREATION",
+            log_keyword,
             "Starting PIPELINE_CONFIG_DETAILS table creation process."
         )
         
@@ -78,7 +78,7 @@ def create_pipeline_config_details_table_if_not_exists(
         return_object['table_name'] = three_part_name
         
         log.info(
-            "PIPELINE_CONFIG_DETAILS_TABLE_CREATION",
+            log_keyword,
             "Configuration extracted.",
             database=database_name,
             schema=schema_name,
@@ -89,7 +89,7 @@ def create_pipeline_config_details_table_if_not_exists(
         
         # Step 1: Get Snowflake connection
         log.info(
-            "PIPELINE_CONFIG_DETAILS_TABLE_CREATION",
+            log_keyword,
             "Attempting to connect to Snowflake."
         )
         
@@ -97,7 +97,7 @@ def create_pipeline_config_details_table_if_not_exists(
         
         if not connection_result['continue_dag_run']:
             log.error(
-                "PIPELINE_CONFIG_DETAILS_TABLE_CREATION",
+                log_keyword,
                 "Failed to establish Snowflake connection.",
                 error_message=connection_result['error_message']
             )
@@ -108,35 +108,41 @@ def create_pipeline_config_details_table_if_not_exists(
         cursor = connection_result['cursor']
         
         log.info(
-            "PIPELINE_CONFIG_DETAILS_TABLE_CREATION",
+            log_keyword,
             "Successfully connected to Snowflake."
         )
         
         # Step 2: Create the table 
         create_table_sql = f"""
             CREATE TABLE IF NOT EXISTS {three_part_name} (
-                CONFIG_ID NUMBER AUTOINCREMENT PRIMARY KEY,
+                
+                ROW_ID NUMBER AUTOINCREMENT START 1 INCREMENT 1,
+                
                 PIPELINE_NAME VARCHAR(1000) DEFAULT 'unknown_pipeline_name',
                 CONFIG_NAME VARCHAR(1000) DEFAULT 'unknown_configuration_name',
+                CONFIG_VERSION INTEGER DEFAULT 1,
+        
+                
                 PIPELINE_DESC VARCHAR(5000) DEFAULT NULL,
-                CONFIG_VERSION FLOAT DEFAULT 1.0,
+
                 NUMBER_OF_STAGES INTEGER DEFAULT 0,
-                SOURCE_CONFIG VARIANT DEFAULT NULL,
-                STAGES_CONFIG VARIANT DEFAULT NULL,
-                TARGET_CONFIG VARIANT DEFAULT NULL,
+                CONFIG VARIANT DEFAULT NULL,
                 IS_ACTIVE BOOLEAN DEFAULT TRUE,
-                MIN_DATA_TIMESTAMP TIMESTAMP_TZ DEFAULT NULL,
-                MAX_DATA_TIMESTAMP TIMESTAMP_TZ DEFAULT NULL,
+                SOURCE_MIN_REQUESTABLE_TIMESTAMP TIMESTAMP_TZ DEFAULT NULL,
+                SOURCE_MAX_REQUESTABLE_TIMESTAMP TIMESTAMP_TZ DEFAULT NULL,
+
                 OWNER_LIST VARIANT DEFAULT NULL,
-                EXPIRY_TIMESTAMP TIMESTAMP_TZ DEFAULT NULL,
+                PIPELINE_RUN_VALID_FROM_TIMESTAMP TIMESTAMP_TZ DEFAULT NULL,                
+                PIPELINE_RUN_VALID_TILL_TIMESTAMP TIMESTAMP_TZ DEFAULT NULL,
                 CREATED_AT TIMESTAMP_TZ DEFAULT CURRENT_TIMESTAMP(),
                 UPDATED_AT TIMESTAMP_TZ DEFAULT CURRENT_TIMESTAMP(),
-                UPDATED_BY VARCHAR(1000) DEFAULT NULL
+                UPDATED_BY VARCHAR(1000) DEFAULT NULL,
+                VALID_FROM_TIMESTAMP TIMESTAMP_TZ DEFAULT CURRENT_TIMESTAMP(),
+                VALID_TO_TIMESTAMP TIMESTAMP_TZ DEFAULT NULL
             )
         """
-        
         log.info(
-            "PIPELINE_CONFIG_DETAILS_TABLE_CREATION",
+            log_keyword,
             "Executing CREATE TABLE IF NOT EXISTS statement."
         )
         
@@ -150,7 +156,7 @@ def create_pipeline_config_details_table_if_not_exists(
         return_object['query_id'] = query_id
         
         log.info(
-            "PIPELINE_CONFIG_DETAILS_TABLE_CREATION",
+            log_keyword,
             "Table created successfully or already exists.",
             full_table_name=three_part_name,
             query_id=query_id
@@ -178,7 +184,7 @@ def create_pipeline_config_details_table_if_not_exists(
         )
         
         log.error(
-            "PIPELINE_CONFIG_DETAILS_TABLE_CREATION",
+            log_keyword,
             "An error occurred during table creation.",
             exc_info=True,
             database=database_name if database_name else 'N/A',
@@ -198,12 +204,12 @@ def create_pipeline_config_details_table_if_not_exists(
             try:
                 cursor.close()
                 log.info(
-                    "PIPELINE_CONFIG_DETAILS_TABLE_CREATION",
+                    log_keyword,
                     "Cursor closed successfully."
                 )
             except Exception as e:
                 log.error(
-                    "PIPELINE_CONFIG_DETAILS_TABLE_CREATION",
+                    log_keyword,
                     "Error closing cursor.",
                     error_message=str(e)
                 )
@@ -212,12 +218,12 @@ def create_pipeline_config_details_table_if_not_exists(
             try:
                 conn.close()
                 log.info(
-                    "PIPELINE_CONFIG_DETAILS_TABLE_CREATION",
+                    log_keyword,
                     "Snowflake connection closed successfully."
                 )
             except Exception as e:
                 log.error(
-                    "PIPELINE_CONFIG_DETAILS_TABLE_CREATION",
+                    log_keyword,
                     "Error closing connection.",
                     error_message=str(e)
                 )
@@ -247,8 +253,8 @@ def fetch_pipeline_config_details(
             - 'query_id' (Optional[str]): Snowflake query ID for the SELECT statement.
             - 'records' (list): List of dict records found, empty list [] if no records.
     """
-    
-    log = logger.new_frame("fetch_pipeline_config_details")
+    log_keyword = "FETCH_PIPELINE_CONFIG_DETAILS"
+    log = logger.new_frame(log_keyword)
     
     # Initialize variables that might not get assigned if early exception occurs
     query_id = None
@@ -273,7 +279,7 @@ def fetch_pipeline_config_details(
     
     try:
         log.info(
-            "PIPELINE_CONFIG_DETAILS_FETCH",
+            log_keyword,
             "Starting fetch operation for pipeline configuration details."
         )
         
@@ -295,7 +301,7 @@ def fetch_pipeline_config_details(
         config_version = fetch_criteria.get('CONFIG_VERSION')
         
         log.info(
-            "PIPELINE_CONFIG_DETAILS_FETCH",
+            log_keyword,
             "Configuration extracted.",
             database=database_name,
             schema=schema_name,
@@ -309,7 +315,7 @@ def fetch_pipeline_config_details(
         
         # Step 1: Get Snowflake connection
         log.info(
-            "PIPELINE_CONFIG_DETAILS_FETCH",
+            log_keyword,
             "Attempting to connect to Snowflake."
         )
         
@@ -317,7 +323,7 @@ def fetch_pipeline_config_details(
         
         if not connection_result['continue_dag_run']:
             log.error(
-                "PIPELINE_CONFIG_DETAILS_FETCH",
+                log_keyword,
                 "Failed to establish Snowflake connection.",
                 error_message=connection_result['error_message']
             )
@@ -330,27 +336,27 @@ def fetch_pipeline_config_details(
         cursor = conn.cursor(DictCursor)
         
         log.info(
-            "PIPELINE_CONFIG_DETAILS_FETCH",
+            log_keyword,
             "Successfully connected to Snowflake with DictCursor."
         )
         
         # Step 2: Build and execute SELECT query
         select_sql = f"""
-            SELECT *
-            FROM {three_part_name}
-            WHERE PIPELINE_NAME = %(pipeline_name)s
-              AND CONFIG_NAME = %(config_name)s
-              AND CONFIG_VERSION = %(config_version)s
+            WITH FETCH_CRITERIA AS (
+                    SELECT *
+                    FROM {three_part_name}
+                    WHERE PIPELINE_NAME = %(pipeline_name)s AND CONFIG_NAME = %(config_name)s
+                )
+            SELECT * FROM FETCH_CRITERIA ORDER BY CONFIG_VERSION DESC, ROW_ID DESC LIMIT 1;
         """
         
         query_params = {
             "pipeline_name": pipeline_name,
-            "config_name": config_name,
-            "config_version": config_version
+            "config_name": config_name
         }
         
         log.info(
-            "PIPELINE_CONFIG_DETAILS_FETCH",
+            log_keyword,
             "Executing SELECT query."
         )
         
@@ -368,7 +374,7 @@ def fetch_pipeline_config_details(
         return_object['records'] = records
         
         log.info(
-            "PIPELINE_CONFIG_DETAILS_FETCH",
+            log_keyword,
             "Query executed successfully.",
             query_id=query_id,
             record_count=len(records)
@@ -377,7 +383,7 @@ def fetch_pipeline_config_details(
         # Empty records is still success
         if len(records) == 0:
             log.info(
-                "PIPELINE_CONFIG_DETAILS_FETCH",
+                log_keyword,
                 "No records found matching criteria (this is not an error).",
                 pipeline_name=pipeline_name,
                 config_name=config_name,
@@ -385,7 +391,7 @@ def fetch_pipeline_config_details(
             )
         else:
             log.info(
-                "PIPELINE_CONFIG_DETAILS_FETCH",
+                log_keyword,
                 "Records fetched successfully.",
                 record_count=len(records)
             )
@@ -414,7 +420,7 @@ def fetch_pipeline_config_details(
         )
         
         log.error(
-            "PIPELINE_CONFIG_DETAILS_FETCH",
+            log_keyword,
             "An error occurred during fetch operation.",
             exc_info=True,
             database=database_name if database_name else 'N/A',
@@ -438,12 +444,12 @@ def fetch_pipeline_config_details(
             try:
                 cursor.close()
                 log.info(
-                    "PIPELINE_CONFIG_DETAILS_FETCH",
+                    log_keyword,
                     "Cursor closed successfully."
                 )
             except Exception as e:
                 log.error(
-                    "PIPELINE_CONFIG_DETAILS_FETCH",
+                    log_keyword,
                     "Error closing cursor.",
                     error_message=str(e)
                 )
@@ -452,20 +458,15 @@ def fetch_pipeline_config_details(
             try:
                 conn.close()
                 log.info(
-                    "PIPELINE_CONFIG_DETAILS_FETCH",
+                    log_keyword,
                     "Snowflake connection closed successfully."
                 )
             except Exception as e:
                 log.error(
-                    "PIPELINE_CONFIG_DETAILS_FETCH",
+                    log_keyword,
                     "Error closing connection.",
                     error_message=str(e)
                 )
-
-
-
-
-
 
 
 

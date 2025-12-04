@@ -1,0 +1,101 @@
+{
+
+    "elasticsearch":{
+        "index_group": "index_grp_1",
+        "index_id": "index_01*",
+        "business_index_name": "Index 01",
+        "timestamp_field_name": "timestamp",
+        "timestamp_format": "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+        "timezone": "America/New_York",
+        "host_url": "https://hostName:portNumber/index_id",
+        "elasticdump_max_retry_attempts": 5,
+        "elasticdump_max_retry_delay_ms": 60000,
+        "elasticdump_max_records_limit":1000,
+        "elasticdump_max_file_size":"250mb",
+        "elasticdump_max_timeout_ms":180000,
+
+        "elasticdump_cmd":["elasticdump",
+                                "--input=host_url",
+                                "--output=aws_s3_uri",
+                                "--use-ssl=true",
+                                "--tlsAuth",
+                                "--headers=elasticsearch_header",
+                                "--type=data",
+                                "--searchBody=elasticsearch_search_body",
+                                "--s3AccessKeyId=aws_access_key_id",
+                                "--s3SecretAccessKey=aws_secret_access_key",
+                                "--retryAttempts=elasticdump_max_retry_attempts",
+                                "--retryDelay=elasticdump_max_retry_delay_ms",
+                                "--limit=elasticdump_max_records_limit",
+                                "--fileSize=elasticdump_max_file_size",
+                                "--timeout=elasticdump_max_timeout_ms"
+                        ],
+
+        "elasticsearch_search_body":{
+            "query": {
+                "bool": {
+                    "must": [
+                        {
+                            "range": {
+                                    "timestamp_field_name": {
+                                                "gte": "start_time",
+                                                "lte": "end_time",
+                                                "format": "timestamp_format",
+                                                "time_zone": "timezone"
+                                            }
+                                    }
+                        }
+                    ]
+                }
+                
+            }   
+        },
+
+        "query_interval_window": "1h",
+        "data_freshness_block_window": "1d"
+    },
+
+    "aws_s3":{
+        "bucket": "bucket_name",
+        "prefix_template":"folder_grp_01/index_group/business_index_name/yyyy_mm_dd/hh_mm/filename_with_extension"
+    },
+
+    "snowflake":{
+        "default_variables" : {
+                    "role": "ETL_ROLE",
+                    "warehouse": "ETL_WH",
+                    "database": "MONITORING_DB",
+                    "schema": "PIPELINE_TRACKING_SCHEMA"                    
+                    },
+
+        "monitoring_variables":{
+                "database": "MONITORING_DB",
+                "schema": "PIPELINE_TRACKING_SCHEMA",
+                "table": "PIPELINE_TRACKING_TABLE"
+            },
+        "raw_data_variables":{
+                "database": "RAW_DATA_DB",
+                "schema": "ELASTICSEARCH_RAW_SCHEMA",
+                "table": "xyz"
+            },
+        "flattened_data_variables":{
+                "database": "RAW_DATA_DB",
+                "schema": "ELASTICSEARCH_STAGE_SCHEMA",
+                "stage": "xyz_stage"
+            }
+
+    },
+    "source_to_stage_threshold" :0,
+    "source_to_target_threshold" :10,
+
+    "max_parallelism": 4,
+    "max_pending_records_to_process": 4,
+
+    "stage_to_target_ingestion_check_interval": "5s", 
+    "max_stage_to_target_ingestion_wait_time": "30m",
+
+    "PIPELINE_NAME":"source_name||stage_name||target_name",
+    "CONFIG_NAME": "index_group||business_index_name||index_id",
+    "CONFIG_VERSION": "1.0"
+
+}

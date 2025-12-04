@@ -53,8 +53,8 @@ def get_snowflake_connection(sf_con_parms: dict, logger: CustomChainLogger, QUER
         ... }
         >>> result = get_snowflake_connection(sf_params, logger, QUERY_TAG='MY_PIPELINE')
     """
-    
-    log = logger.new_frame("get_snowflake_connection")
+    log_keyword = "SNOWFLAKE_CONNECTION"
+    log = logger.new_frame(log_keyword)
 
     return_object = {
         'conn': None,
@@ -68,10 +68,8 @@ def get_snowflake_connection(sf_con_parms: dict, logger: CustomChainLogger, QUER
         username = sf_con_parms.get("username")
         password = sf_con_parms.get("password")
         account = sf_con_parms.get("account")
-        
-        # Extract optional context parameters
         role = sf_con_parms.get("role")
-        warehouse = sf_con_parms.get("warehouse")
+        warehouse = sf_con_parms.get("warehouse")        
         database = sf_con_parms.get("database")
         schema = sf_con_parms.get("schema")
         
@@ -85,7 +83,7 @@ def get_snowflake_connection(sf_con_parms: dict, logger: CustomChainLogger, QUER
             session_parameters['QUERY_TAG'] = QUERY_TAG
         
         log.info(
-            "SNOWFLAKE_CONNECTION",
+            log_keyword,
             "Attempting to connect to Snowflake...",
             account=account,
             user=username,
@@ -123,7 +121,7 @@ def get_snowflake_connection(sf_con_parms: dict, logger: CustomChainLogger, QUER
 
         # Connect to Snowflake
         log.info(
-            "SNOWFLAKE_CONNECTION",
+            log_keyword,
             "Initiating connection with all parameters..."
         )
         
@@ -131,7 +129,7 @@ def get_snowflake_connection(sf_con_parms: dict, logger: CustomChainLogger, QUER
         cursor = conn.cursor()
 
         log.info(
-            "SNOWFLAKE_CONNECTION",
+            log_keyword,
             "Successfully connected to Snowflake and created cursor.",
             session_id=conn.session_id,
             connection_id=conn.connection_id,
@@ -207,7 +205,7 @@ def get_snowflake_connection(sf_con_parms: dict, logger: CustomChainLogger, QUER
                 )
         
         log.error(
-            "SNOWFLAKE_CONNECTION",
+            log_keyword,
             "Snowflake connection failed (DatabaseError).",
             exc_info=True,
             is_timeout=is_timeout,
@@ -247,7 +245,7 @@ def get_snowflake_connection(sf_con_parms: dict, logger: CustomChainLogger, QUER
         )
         
         log.error(
-            "SNOWFLAKE_CONNECTION",
+            log_keyword,
             "Snowflake connection failed.",
             exc_info=True, 
             error_message=e.msg,
@@ -280,7 +278,7 @@ def get_snowflake_connection(sf_con_parms: dict, logger: CustomChainLogger, QUER
         )
         
         log.error(
-            "SNOWFLAKE_CONNECTION",
+            log_keyword,
             "An unexpected error occurred during connection.",
             exc_info=True,
             error_message=str(e)
