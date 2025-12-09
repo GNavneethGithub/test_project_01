@@ -3,6 +3,7 @@ from __future__ import annotations
 
 
 
+from datetime import date
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -268,3 +269,21 @@ def transfer_records_parallel(
         raise RuntimeError("S3 transfer failed; weekly prefix cleaned") from first_exc
 
     logger.info("Weekly parallel S3 transfer completed with no errors.")
+
+
+
+
+def is_week_already_loaded(aws_config: Dict[str, Any], run_date: date) -> bool:
+    """
+    Convenience helper: compute this run's weekly prefix and check
+    whether any data already exists for that week in the target bucket.
+    """
+    target_bucket = aws_config.get("target_bucket")
+    if not target_bucket:
+        raise ValueError("aws_config['target_bucket'] must be provided")
+
+    base_prefix = aws_config.get("target_prefix") or ""
+    weekly_prefix = build_weekly_prefix(base_prefix, run_date)
+
+    return prefix_has_data(aws_config, target_bucket, weekly_prefix)
+

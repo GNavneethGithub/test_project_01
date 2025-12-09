@@ -10,6 +10,8 @@ from framework.config_loader import load_project_config
 from framework.logging_setup import setup_logging
 from framework.tasks.rapid7_export_task import rapid7_export_task
 from framework.tasks.s3_transfer_task import s3_transfer_task
+from framework.tasks.week_check_task import week_check_task
+
 
 # Adjust path as needed in your Airflow environment
 PROJECT_CONFIG_PATH = "/opt/airflow/dags/users/project_01/config.json"
@@ -17,6 +19,15 @@ PROJECT_CONFIG_PATH = "/opt/airflow/dags/users/project_01/config.json"
 # Load config and set up logging once at import time
 config = load_project_config(PROJECT_CONFIG_PATH)
 logger = setup_logging(config)
+
+
+
+def week_check_callable(run_date: str, **context):
+    """
+    Task 0: check if this ISO week is already processed in S3.
+    If yes, it will raise AirflowSkipException and skip the rest.
+    """
+    week_check_task(config, run_date_str=run_date)
 
 
 def rapid7_export_callable(**context):
@@ -58,6 +69,12 @@ with DAG(
     default_args=default_args,
     max_active_runs=1,
 ) as dag:
+    
+    t0 = PythonOperator(
+        task_id="check_week_already_loaded",
+        python_callable=week_check_callable,
+        op_kwargs={"run_date": "{{ ds }}"},
+    )
 
     t1 = PythonOperator(
         task_id="rapid7_export",
@@ -67,7 +84,7 @@ with DAG(
     t2 = PythonOperator(
         task_id="s3_transfer",
         python_callable=s3_transfer_callable,
-        op_kwargs={"run_date": "{{ ds }}"},  # ds = logical date (YYYY-MM-DD)
+        op_kwargs={"run_date": "{{ ds }}"}, 
     )
 
-    t1 >> t2
+    t0 >> t1 >> t2
