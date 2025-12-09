@@ -262,7 +262,7 @@ def send_links_to_s3(links_path="links.ndjson", target_bucket=None, target_prefi
     records = read_links_ndjson(links_path)
     total = len(records)
     print(f"Found {total} records in {links_path}")
-
+ 
     for rec in records:
         if "url" in rec:
             url = rec["url"]

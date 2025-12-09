@@ -1,0 +1,26 @@
+{
+  "api_": {
+    "endpoint": "https://us.api.insight.rapid7.com/export/graphql",
+    "api_key": null,
+    "api_key_env": "RAPID7_API_KEY_PROJECT_01",
+    "poll_interval_sec": 30,
+    "export_timeout_sec": 3600,
+    "http_timeout_sec": 60
+  },
+  "aws": {
+    "target_bucket": "proj01-target-bucket",
+    "target_prefix": "proj01/rapid7/data",
+    "region": "us-east-1",
+    "profile": null,
+    "access_key_id": null,
+    "secret_access_key": null,
+    "session_token": null,
+    "max_workers": 8,
+    "http_download_timeout_sec": 300
+  },
+  "logging": {
+    "level": "INFO"
+  }
+}
+
+
