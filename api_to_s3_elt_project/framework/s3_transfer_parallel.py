@@ -1,6 +1,8 @@
 # framework/s3_transfer_parallel.py
 from __future__ import annotations
 
+
+
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -45,27 +47,28 @@ def parse_s3_uri(s3_uri: str) -> tuple[str, str]:
     return bucket, prefix
 
 
+
 def build_weekly_prefix(base_prefix: str | None, run_date: date) -> str:
     """
     Build final S3 prefix like:
-      <base_prefix>/<year>/<month>/<week_xx>/
+      <base_prefix>/<ISO_YEAR>/week_<ISO_WEEK>/
+
     Example:
       base_prefix = "proj01/rapid7/data"
       run_date = 2025-03-05 (ISO week 10)
-      => "proj01/rapid7/data/2025/03/week_10"
+      => "proj01/rapid7/data/2025/week_10"
     """
-    iso = run_date.isocalendar()
-    year = iso[0]
-    week = iso[1]
-    month = run_date.month
+    iso_year, iso_week, _ = run_date.isocalendar()
 
     parts: List[str] = []
     if base_prefix:
         parts.append(base_prefix.rstrip("/"))
-    parts.append(f"{year:04d}")
-    parts.append(f"{month:02d}")
-    parts.append(f"week_{week:02d}")
+
+    parts.append(f"{iso_year:04d}")
+    parts.append(f"week_{iso_week:02d}")
+
     return "/".join(parts)
+
 
 
 def prefix_has_data(aws_config: Dict[str, Any], bucket: str, prefix: str) -> bool:
