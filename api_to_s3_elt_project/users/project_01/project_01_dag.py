@@ -6,11 +6,16 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
+from airflow.operators.empty import EmptyOperator
+from airflow.operators.branch import BranchPythonOperator
+
+
+
 from framework.config_loader import load_project_config
 from framework.logging_setup import setup_logging
 from framework.tasks.rapid7_export_task import rapid7_export_task
 from framework.tasks.s3_transfer_task import s3_transfer_task
-from framework.tasks.week_check_task import week_check_task
+from framework.tasks.week_check_task import week_check_branch_task
 
 
 # Adjust path as needed in your Airflow environment
@@ -27,7 +32,7 @@ def week_check_callable(run_date: str, **context):
     Task 0: check if this ISO week is already processed in S3.
     If yes, it will raise AirflowSkipException and skip the rest.
     """
-    week_check_task(config, run_date_str=run_date)
+    week_check_branch_task(config, run_date_str=run_date)
 
 
 def rapid7_export_callable(**context):
@@ -70,11 +75,16 @@ with DAG(
     max_active_runs=1,
 ) as dag:
     
-    t0 = PythonOperator(
+    t0 = BranchPythonOperator(
         task_id="check_week_already_loaded",
-        python_callable=week_check_callable,
-        op_kwargs={"run_date": "{{ ds }}"},
+        python_callable=week_check_branch_task,
+        op_kwargs={
+            "config": config,
+            "run_date_str": "{{ ds }}",
+        },
     )
+
+    t_skip = EmptyOperator(task_id="skip_pipeline")
 
     t1 = PythonOperator(
         task_id="rapid7_export",
@@ -87,4 +97,5 @@ with DAG(
         op_kwargs={"run_date": "{{ ds }}"}, 
     )
 
-    t0 >> t1 >> t2
+    t0 >> [t_skip, t1]
+    t1 >> t2
